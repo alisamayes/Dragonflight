@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dragonflight"
+version = "0.1.0"
+description = "Turn-based dragon raiding strategy game (MVP)"
+readme = "Documentation/Dragonflight Specification and MVP.md"
+# Pygame ships wheels for 3.11–3.13 on Windows; 3.14+ may fall back to a broken source build.
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "pygame>=2.5,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.8,<1",
+]
+
+[project.scripts]
+dragonflight = "dragonflight.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
