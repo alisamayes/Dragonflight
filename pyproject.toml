@@ -6,17 +6,19 @@ build-backend = "setuptools.build_meta"
 name = "dragonflight"
 version = "0.1.0"
 description = "Turn-based dragon raiding strategy game (MVP)"
-readme = "Documentation/Dragonflight Specification and MVP.md"
+readme = "README.md"
 # Pygame ships wheels for 3.11–3.13 on Windows; 3.14+ may fall back to a broken source build.
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "pygame>=2.5,<3",
+    "pydantic>=2,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<9",
     "ruff>=0.8,<1",
+    "mypy>=1.10,<2",
 ]
 
 [project.scripts]
@@ -36,3 +38,11 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+strict_optional = true
+pretty = true
+files = ["src/dragonflight", "tests"]
+

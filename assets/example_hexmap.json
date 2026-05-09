@@ -1,6 +1,6 @@
 {
   "id": "510d8464-127c-49d4-b3bd-5865a944d013",
-  "name": "Untitled Map",
+  "name": "Dev Map",
   "description": "",
   "ownerId": null,
   "settings": {
@@ -183,19 +183,21 @@
       "q": 0,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "0,19,surface": {
       "q": 0,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "0,20,surface": {
       "q": 0,
@@ -273,19 +275,21 @@
       "q": 0,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "0,29,surface": {
       "q": 0,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "1,0,surface": {
       "q": 1,
@@ -462,10 +466,11 @@
       "q": 1,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "1,20,surface": {
       "q": 1,
@@ -534,28 +539,31 @@
       "q": 1,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "1,28,surface": {
       "q": 1,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "1,29,surface": {
       "q": 1,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "2,0,surface": {
       "q": 2,
@@ -725,19 +733,21 @@
       "q": 2,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "2,19,surface": {
       "q": 2,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "2,20,surface": {
       "q": 2,
@@ -806,28 +816,31 @@
       "q": 2,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "2,28,surface": {
       "q": 2,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "2,29,surface": {
       "q": 2,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "3,0,surface": {
       "q": 3,
@@ -995,28 +1008,31 @@
       "q": 3,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "3,19,surface": {
       "q": 3,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "3,20,surface": {
       "q": 3,
       "r": 20,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "3,21,surface": {
       "q": 3,
@@ -1076,46 +1092,51 @@
       "q": 3,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "3,28,surface": {
       "q": 3,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "3,29,surface": {
       "q": 3,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,0,surface": {
       "q": 4,
       "r": 0,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,1,surface": {
       "q": 4,
       "r": 1,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,2,surface": {
       "q": 4,
@@ -1265,28 +1286,31 @@
       "q": 4,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,19,surface": {
       "q": 4,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,20,surface": {
       "q": 4,
       "r": 20,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,21,surface": {
       "q": 4,
@@ -1337,73 +1361,81 @@
       "q": 4,
       "r": 26,
       "layer": "surface",
-      "hexType": "sea",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,27,surface": {
       "q": 4,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,28,surface": {
       "q": 4,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "4,29,surface": {
       "q": 4,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,0,surface": {
       "q": 5,
       "r": 0,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,1,surface": {
       "q": 5,
       "r": 1,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,2,surface": {
       "q": 5,
       "r": 2,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,3,surface": {
       "q": 5,
       "r": 3,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,4,surface": {
       "q": 5,
@@ -1535,19 +1567,21 @@
       "q": 5,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,19,surface": {
       "q": 5,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,20,surface": {
       "q": 5,
@@ -1607,37 +1641,41 @@
       "q": 5,
       "r": 26,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,27,surface": {
       "q": 5,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,28,surface": {
       "q": 5,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "5,29,surface": {
       "q": 5,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,0,surface": {
       "q": 6,
@@ -1661,28 +1699,31 @@
       "q": 6,
       "r": 2,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,3,surface": {
       "q": 6,
       "r": 3,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,4,surface": {
       "q": 6,
       "r": 4,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,5,surface": {
       "q": 6,
@@ -1707,10 +1748,11 @@
       "q": 6,
       "r": 7,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,8,surface": {
       "q": 6,
@@ -1725,10 +1767,11 @@
       "q": 6,
       "r": 9,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,10,surface": {
       "q": 6,
@@ -1797,10 +1840,11 @@
       "q": 6,
       "r": 17,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,18,surface": {
       "q": 6,
@@ -1880,37 +1924,41 @@
       "q": 6,
       "r": 26,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,27,surface": {
       "q": 6,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,28,surface": {
       "q": 6,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "6,29,surface": {
       "q": 6,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,0,surface": {
       "q": 7,
@@ -1952,10 +2000,11 @@
       "q": 7,
       "r": 4,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,5,surface": {
       "q": 7,
@@ -1971,73 +2020,81 @@
       "q": 7,
       "r": 6,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,7,surface": {
       "q": 7,
       "r": 7,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,8,surface": {
       "q": 7,
       "r": 8,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,9,surface": {
       "q": 7,
       "r": 9,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,10,surface": {
       "q": 7,
       "r": 10,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,11,surface": {
       "q": 7,
       "r": 11,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,12,surface": {
       "q": 7,
       "r": 12,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,13,surface": {
       "q": 7,
       "r": 13,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,14,surface": {
       "q": 7,
@@ -2052,37 +2109,41 @@
       "q": 7,
       "r": 15,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,16,surface": {
       "q": 7,
       "r": 16,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,17,surface": {
       "q": 7,
       "r": 17,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,18,surface": {
       "q": 7,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,19,surface": {
       "q": 7,
@@ -2151,37 +2212,41 @@
       "q": 7,
       "r": 26,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,27,surface": {
       "q": 7,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,28,surface": {
       "q": 7,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "7,29,surface": {
       "q": 7,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,0,surface": {
       "q": 8,
@@ -2241,10 +2306,11 @@
       "q": 8,
       "r": 6,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,7,surface": {
       "q": 8,
@@ -2295,46 +2361,51 @@
       "q": 8,
       "r": 12,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,13,surface": {
       "q": 8,
       "r": 13,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,14,surface": {
       "q": 8,
       "r": 14,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,15,surface": {
       "q": 8,
       "r": 15,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,16,surface": {
       "q": 8,
       "r": 16,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,17,surface": {
       "q": 8,
@@ -2421,37 +2492,41 @@
       "q": 8,
       "r": 26,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,27,surface": {
       "q": 8,
       "r": 27,
       "layer": "surface",
-      "hexType": "sea",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,28,surface": {
       "q": 8,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "8,29,surface": {
       "q": 8,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "9,0,surface": {
       "q": 9,
@@ -2709,19 +2784,21 @@
       "q": 9,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "9,29,surface": {
       "q": 9,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "10,0,surface": {
       "q": 10,
@@ -2980,19 +3057,21 @@
       "q": 10,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "10,29,surface": {
       "q": 10,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "11,0,surface": {
       "q": 11,
@@ -6214,10 +6293,11 @@
       "q": 22,
       "r": 27,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "22,28,surface": {
       "q": 22,
@@ -6232,10 +6312,11 @@
       "q": 22,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,0,surface": {
       "q": 23,
@@ -6448,64 +6529,71 @@
       "q": 23,
       "r": 23,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,24,surface": {
       "q": 23,
       "r": 24,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,25,surface": {
       "q": 23,
       "r": 25,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,26,surface": {
       "q": 23,
       "r": 26,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,27,surface": {
       "q": 23,
       "r": 27,
       "layer": "surface",
-      "hexType": "sea",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,28,surface": {
       "q": 23,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "23,29,surface": {
       "q": 23,
       "r": 29,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,0,surface": {
       "q": 24,
@@ -6700,37 +6788,41 @@
       "q": 24,
       "r": 21,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,22,surface": {
       "q": 24,
       "r": 22,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,23,surface": {
       "q": 24,
       "r": 23,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,24,surface": {
       "q": 24,
       "r": 24,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,25,surface": {
       "q": 24,
@@ -6745,10 +6837,11 @@
       "q": 24,
       "r": 26,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,27,surface": {
       "q": 24,
@@ -6763,10 +6856,11 @@
       "q": 24,
       "r": 28,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "24,29,surface": {
       "q": 24,
@@ -6980,10 +7074,11 @@
       "q": 25,
       "r": 22,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "25,23,surface": {
       "q": 25,
@@ -7224,28 +7319,31 @@
       "q": 26,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "26,20,surface": {
       "q": 26,
       "r": 20,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "26,21,surface": {
       "q": 26,
       "r": 21,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "26,22,surface": {
       "q": 26,
@@ -7487,28 +7585,31 @@
       "q": 27,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "27,19,surface": {
       "q": 27,
       "r": 19,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "27,20,surface": {
       "q": 27,
       "r": 20,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "27,21,surface": {
       "q": 27,
@@ -7748,19 +7849,21 @@
       "q": 28,
       "r": 17,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "28,18,surface": {
       "q": 28,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "28,19,surface": {
       "q": 28,
@@ -8009,28 +8112,31 @@
       "q": 29,
       "r": 16,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "29,17,surface": {
       "q": 29,
       "r": 17,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "29,18,surface": {
       "q": 29,
       "r": 18,
       "layer": "surface",
-      "hexType": "ocean",
+      "hexType": "custom-river-0001",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#3a7bd5"
     },
     "29,19,surface": {
       "q": 29,
@@ -8148,12 +8254,17 @@
     },
     {
       "id": "custom-5c5b120e",
-      "name": "Village",
+      "name": "Settlement",
       "color": "#fff705"
+    },
+    {
+      "id": "custom-river-0001",
+      "name": "River",
+      "color": "#3a7bd5"
     }
   ],
   "activeLayer": "surface",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "createdAt": "2026-05-07T14:18:38.957Z",
-  "updatedAt": "2026-05-07T14:31:54.699Z"
+  "updatedAt": "2026-05-08T14:50:17.507Z"
 }

@@ -124,7 +124,7 @@ Game over immediately triggers when either condition occurs.
 - No fog of war in MVP
 
 ## Perspective
-- Isometric world-map style presentation
+- Isometric world-map style presentation. Intial development should just use coloured hexs for simplicity to get mechanical workings in place and later on isometric style artwork for each asset shall be added in to provide more detail
 
 ## Hex coordinate system
 - Use **axial coordinates** for the hex grid (implementation detail for pathfinding, distance checks, and map authoring)
@@ -252,14 +252,25 @@ If aggression exceeds threshold:
 # 7. Dragon System
 
 ## Dragon Overview
-The player controls a single dragon.
+The player controls a single dragon each playthrough
 
 Initial dragon type:
 - Red Fire Dragon
 
-Future dragon types may be added later.
+Other dragon type: 
+Black Tank Dragon
+Yellow Chrono Dragon
+Brown Earth Dragon
+(More may be implemented later)
+
 
 Each dragon type is expected to have a **stat baseline** (e.g. red dragons: faster, higher attack, lower defence; black dragons: slower, higher defence — exact numbers decided during development).
+
+Each dragon will have a different set of abilities that can be unlocked as the dragon levels up. The exact nature of these will be determined during development, but the Dragon class should expect one passive ability and two activatable abilities that can be used once each day. This will help to lend some diversity to different dragons and playthoughs.
+
+Passives will be a constant modifier the Dragon has throughout that run. An example would be a "Black Dragons have thick, razor like scales. In each combat round the enemy takes 1 points of damage".
+
+An activatable affect would be a limited use ability the player can use to gain a benefit. For example "Yellow Dragons use their mastery of chrono magic to make the next action not consume any time"
 
 ---
 
@@ -289,11 +300,11 @@ Travel time for multi-step routes uses the **total hex distance** along the chos
 ---
 
 ## Dragon Progression
-Gold may be spent to permanently increase dragon stats.
+Gold may be spent to permanently increase dragon stats. At intervals (for example lvl 5, lvl 10, lvl 15) the dragon will unlock their race based skills.
 
-No skill trees or elemental systems exist in MVP.
+There are different elemental types of dragons, but no different types of damage as of current. All dragons deal the same type of damage
 
-No meta progression exists in MVP.
+No meta progression exists in intial plans, but later a rougelite aspect may be added.
 
 ---
 
