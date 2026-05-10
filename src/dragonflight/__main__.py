@@ -1,10 +1,13 @@
 """Entry point for ``python -m dragonflight`` / the ``dragonflight`` console script.
 
-Slice 1 wiring: load the bundled example map and open a Pygame window that
-renders it as flat-top coloured hexes (spec §4 Perspective bullet). All real
-behaviour lives in ``map_loader`` and ``render``; this module only resolves
-the map path, dispatches, and turns expected failures into clean
-human-readable error messages instead of raw tracebacks at the console.
+Loads the bundled example map and opens the interactive Pygame session (dragon
+movement, reachability tinting, hour bar). Map loading lives in ``map_loader``;
+the session loop lives in ``movement_playtest``. This module resolves the map
+path and turns expected failures into clean human-readable error messages
+instead of raw tracebacks at the console.
+
+For a non-interactive static map preview only, call
+:func:`dragonflight.render.run_demo` from code or a small script.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ import sys
 from pathlib import Path
 
 from .map_loader import MapLoadError, load_map
-from .render import run_demo
+from .movement_playtest import run_movement_playtest
 
 #: Project layout invariant — ``src/dragonflight/__main__.py`` sits two
 #: directories below the project root, where ``assets/`` lives. Recorded as a
@@ -39,12 +42,7 @@ def _example_map_path() -> Path:
 
 
 def main() -> None:
-    """Open the Slice 1 demo window with the bundled example map.
-
-    Exits non-zero with a clear ``stderr`` message on expected failures
-    (missing map file, invalid map JSON). Unexpected exceptions still
-    propagate so bugs surface during development.
-    """
+    """Load the example map and run the interactive movement session (requires pygame)."""
     map_path = _example_map_path()
     if not map_path.exists():
         print(
@@ -62,7 +60,7 @@ def main() -> None:
         )
         raise SystemExit(1) from exc
 
-    run_demo(game_map)
+    run_movement_playtest(game_map)
 
 
 if __name__ == "__main__":

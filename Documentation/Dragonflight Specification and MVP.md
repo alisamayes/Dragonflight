@@ -55,7 +55,6 @@ Once the dragon returns:
 
 Citadel repair costs:
 - **Static but expensive** baseline cost (exact value tuned during development)
-
 Dragon stat upgrades:
 - Upgrade costs **scale with current stat levels / progression tier** (tuned during development)
 

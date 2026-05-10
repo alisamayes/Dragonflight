@@ -28,11 +28,12 @@ Architectural rules (locked by Architectural Lead):
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import pygame
 
 from .hex_coord import HEX_CORNERS, hex_corner_offset, offset_to_pixel
-from .map_state import GameMap
+from .map_state import GameMap, Tile
 from .terrain import Terrain
 
 # --- Public colour / sizing policy ------------------------------------------
@@ -208,6 +209,9 @@ def render_map(
     game_map: GameMap,
     hex_size: float,
     origin: tuple[float, float],
+    *,
+    tile_color: Callable[[Tile], tuple[int, int, int]] | None = None,
+    clear_background: bool = True,
 ) -> None:
     """Draw the entire map onto ``surface``.
 
@@ -218,8 +222,14 @@ def render_map(
     :func:`~dragonflight.hex_coord.offset_to_pixel` (odd-q flat-top), which
     is what makes a ``width × height`` map render as a square rather than a
     rhombus.
+
+    When ``tile_color`` is provided, each tile's fill RGB comes from that
+    callback (dev overlays, reachability tinting). When ``clear_background``
+    is ``False``, existing pixels outside the hex layer are preserved — useful
+    when a HUD strip already occupies the top of the surface.
     """
-    surface.fill(BACKGROUND_COLOR)
+    if clear_background:
+        surface.fill(BACKGROUND_COLOR)
     origin_x, origin_y = origin
     for tile in game_map:
         cx_off, cy_off = offset_to_pixel(tile.coord, hex_size)
@@ -229,7 +239,8 @@ def render_map(
             (cx + dx, cy + dy)
             for dx, dy in (hex_corner_offset(hex_size, i) for i in range(HEX_CORNERS))
         ]
-        pygame.draw.polygon(surface, TERRAIN_COLORS[tile.terrain], polygon)
+        fill = TERRAIN_COLORS[tile.terrain] if tile_color is None else tile_color(tile)
+        pygame.draw.polygon(surface, fill, polygon)
         pygame.draw.polygon(surface, HEX_OUTLINE_COLOR, polygon, width=HEX_OUTLINE_WIDTH)
 
 
