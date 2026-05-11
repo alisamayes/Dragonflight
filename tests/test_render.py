@@ -23,7 +23,9 @@ from dragonflight.render import (
     MAX_WINDOW_WIDTH,
     TERRAIN_COLORS,
     compute_render_hex_size,
+    compute_render_hex_size_for_canvas,
     compute_window_size,
+    layout_map_on_canvas,
 )
 from dragonflight.terrain import Terrain
 
@@ -79,6 +81,25 @@ class TestComputeRenderHexSize:
     def test_returns_positive_for_example_map(self, example_map: GameMap) -> None:
         size = compute_render_hex_size(example_map)
         assert size > 0.0
+
+    def test_smaller_canvas_downscales_below_max_window(self, example_map: GameMap) -> None:
+        baseline = compute_render_hex_size(example_map)
+        small = compute_render_hex_size_for_canvas(example_map, 640, 480)
+        assert small <= baseline
+        assert small > 0.0
+
+
+class TestLayoutMapOnCanvas:
+    def test_footprint_matches_compute_window_size(self, example_map: GameMap) -> None:
+        hex_size, _origin, footprint = layout_map_on_canvas(example_map, 720, 720)
+        assert compute_window_size(example_map, hex_size) == footprint
+
+    def test_wider_canvas_shifts_origin_right(self, example_map: GameMap) -> None:
+        """Same map height budget → same hex size; extra width is letterboxed."""
+        hs_narrow, origin_narrow, _ = layout_map_on_canvas(example_map, 400, 400)
+        hs_wide, origin_wide, _ = layout_map_on_canvas(example_map, 700, 400)
+        assert hs_narrow == pytest.approx(hs_wide)
+        assert origin_wide[0] > origin_narrow[0]
 
 
 class TestComputeWindowSize:

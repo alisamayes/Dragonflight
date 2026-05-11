@@ -65,11 +65,18 @@ HEX_OUTLINE_WIDTH: int = 1
 #: Pixel margin between the rendered map's bounding box and the window edge.
 MARGIN_PX: int = 24
 
-#: Soft caps on the demo window so the map stays visible on typical 1920x1080
-#: desktops (with chrome). ``compute_render_hex_size`` down-scales the
-#: authored hex size to honour these caps; it never up-scales.
+#: Soft caps on the default / design-time window so the map stays comfortable
+#: on large monitors. ``compute_render_hex_size`` down-scales the authored hex
+#: size to honour these caps; it never up-scales. Resizable sessions use
+#: :func:`compute_render_hex_size_for_canvas` with the live map viewport instead.
 MAX_WINDOW_WIDTH: int = 1500
 MAX_WINDOW_HEIGHT: int = 950
+
+#: Smallest window the interactive client allows (total Pygame surface, including
+#: any chrome such as the movement playtest time bar). Prevents unusably tiny
+#: hit targets while still fitting small laptops.
+MIN_CLIENT_WIDTH: int = 800
+MIN_CLIENT_HEIGHT: int = 600
 
 # --- Internal numeric constants ---------------------------------------------
 
@@ -169,26 +176,42 @@ def _origin_for(game_map: GameMap, hex_size: float) -> tuple[float, float]:
 # --- Public sizing / drawing API --------------------------------------------
 
 
-def compute_render_hex_size(game_map: GameMap) -> float:
-    """Pick a hex size (in pixels) that fits the map inside ``MAX_WINDOW_*``.
+def compute_render_hex_size_for_canvas(
+    game_map: GameMap,
+    canvas_width: int,
+    canvas_height: int,
+) -> float:
+    """Pick a hex size (in pixels) so the map fits inside a ``canvas_width × canvas_height`` area.
 
-    Down-scales the authored ``game_map.hex_size`` so the entire map's
-    bounding box (plus ``2 * MARGIN_PX``) fits within
-    ``MAX_WINDOW_WIDTH × MAX_WINDOW_HEIGHT``. Never up-scales above the
-    authored size — small maps stay at their authored hex size rather than
-    ballooning to fill the window.
+    The canvas is the full pixel rectangle reserved for the map layer (the
+    usual ``2 * MARGIN_PX`` inset still applies). Down-scales the authored
+    ``game_map.hex_size`` when the bounding box would overflow; never up-scales
+    above the authored size.
     """
     authored = float(game_map.hex_size)
     if authored <= 0.0 or not game_map.tiles:
         return authored
 
     width_at_authored, height_at_authored = _pixel_bbox_size(game_map, authored)
-    avail_w = max(0.0, MAX_WINDOW_WIDTH - 2 * MARGIN_PX - _FIT_SAFETY_PX)
-    avail_h = max(0.0, MAX_WINDOW_HEIGHT - 2 * MARGIN_PX - _FIT_SAFETY_PX)
+    avail_w = max(0.0, float(canvas_width) - 2 * MARGIN_PX - _FIT_SAFETY_PX)
+    avail_h = max(0.0, float(canvas_height) - 2 * MARGIN_PX - _FIT_SAFETY_PX)
 
     scale_w = 1.0 if width_at_authored <= avail_w else avail_w / width_at_authored
     scale_h = 1.0 if height_at_authored <= avail_h else avail_h / height_at_authored
     return authored * min(1.0, scale_w, scale_h)
+
+
+def compute_render_hex_size(game_map: GameMap) -> float:
+    """Pick a hex size (in pixels) that fits the map inside ``MAX_WINDOW_*``.
+
+    Convenience wrapper for fixed design-time caps; resizable clients should
+    call :func:`compute_render_hex_size_for_canvas` with the live viewport.
+    """
+    return compute_render_hex_size_for_canvas(
+        game_map,
+        MAX_WINDOW_WIDTH,
+        MAX_WINDOW_HEIGHT,
+    )
 
 
 def compute_window_size(game_map: GameMap, hex_size: float) -> tuple[int, int]:
@@ -202,6 +225,55 @@ def compute_window_size(game_map: GameMap, hex_size: float) -> tuple[int, int]:
     width = int(math.ceil(pixel_w)) + 2 * MARGIN_PX
     height = int(math.ceil(pixel_h)) + 2 * MARGIN_PX
     return width, height
+
+
+def clamp_client_window_size(
+    width: int,
+    height: int,
+    desktop_wh: tuple[int, int],
+) -> tuple[int, int]:
+    """Clamp client dimensions to ``[MIN_CLIENT_*, desktop]`` (inclusive)."""
+    d_w, d_h = desktop_wh
+    d_w_eff = max(d_w, MIN_CLIENT_WIDTH)
+    d_h_eff = max(d_h, MIN_CLIENT_HEIGHT)
+    return (
+        max(MIN_CLIENT_WIDTH, min(width, d_w_eff)),
+        max(MIN_CLIENT_HEIGHT, min(height, d_h_eff)),
+    )
+
+
+def client_size_from_resize_event(event: pygame.event.Event) -> tuple[int, int] | None:
+    """Return ``(width, height)`` for a pygame window resize event, else ``None``."""
+    window_resized = getattr(pygame, "WINDOWRESIZED", None)
+    if window_resized is not None and event.type == window_resized:
+        return int(event.x), int(event.y)
+    if event.type == pygame.VIDEORESIZE:
+        size = getattr(event, "size", None)
+        if size is not None:
+            w, h = size
+            return int(w), int(h)
+        return int(event.w), int(event.h)
+    return None
+
+
+def layout_map_on_canvas(
+    game_map: GameMap,
+    canvas_width: int,
+    canvas_height: int,
+) -> tuple[float, tuple[float, float], tuple[int, int]]:
+    """Fit the map inside a viewport and return draw parameters.
+
+    Returns ``(hex_size, (origin_x, origin_y), (map_w, map_h))`` for passing
+    to :func:`render_map`. When the viewport is larger than the tight map
+    bounds, the map is centred with equal padding. ``map_w``/``map_h`` are
+    the pixel footprint from :func:`compute_window_size` at ``hex_size``.
+    """
+    hex_size = compute_render_hex_size_for_canvas(game_map, canvas_width, canvas_height)
+    map_w, map_h = compute_window_size(game_map, hex_size)
+    ox, oy = _origin_for(game_map, hex_size)
+    pad_x = max(0.0, (float(canvas_width) - float(map_w)) / 2.0)
+    pad_y = max(0.0, (float(canvas_height) - float(map_h)) / 2.0)
+    return hex_size, (ox + pad_x, oy + pad_y), (map_w, map_h)
 
 
 def render_map(
@@ -245,24 +317,48 @@ def render_map(
 
 
 def run_demo(game_map: GameMap, *, window_title: str = "Dragonflight — map preview") -> None:
-    """Open a fixed-size Pygame window, draw ``game_map`` once, and idle.
+    """Open a resizable Pygame window, draw ``game_map``, and idle.
+
+    The map scales down when the window is smaller than the design-time cap
+    and is letterboxed when larger (no up-scaling past the authored hex size).
 
     Quits on ``pygame.QUIT`` (window X button) and on ``KEYDOWN`` for
     ``K_ESCAPE``. Pygame is always shut down via ``finally`` so the process
     exits cleanly even if rendering raises.
     """
-    hex_size = compute_render_hex_size(game_map)
-    window_size = compute_window_size(game_map, hex_size)
-    origin = _origin_for(game_map, hex_size)
-
     pygame.init()
+    pygame.display.init()
     try:
-        surface = pygame.display.set_mode(window_size)
-        pygame.display.set_caption(window_title)
-        clock = pygame.time.Clock()
+        desktop = pygame.display.get_desktop_sizes()[0]
+    except (IndexError, pygame.error):
+        desktop = (
+            pygame.display.Info().current_w,
+            pygame.display.Info().current_h,
+        )
 
-        render_map(surface, game_map, hex_size, origin)
+    reserve_px = 80
+    cap_w = max(MIN_CLIENT_WIDTH, desktop[0] - reserve_px)
+    cap_h = max(MIN_CLIENT_HEIGHT, desktop[1] - reserve_px)
+
+    design_hex = compute_render_hex_size(game_map)
+    design_w, design_h = compute_window_size(game_map, design_hex)
+    initial_w = min(max(MIN_CLIENT_WIDTH, design_w), cap_w)
+    initial_h = min(max(MIN_CLIENT_HEIGHT, design_h), cap_h)
+
+    def redraw(client_w: int, client_h: int) -> pygame.Surface:
+        hex_size_, origin_, _ = layout_map_on_canvas(game_map, client_w, client_h)
+        surf = pygame.display.set_mode(
+            (client_w, client_h),
+            pygame.RESIZABLE,
+        )
+        pygame.display.set_caption(window_title)
+        render_map(surf, game_map, hex_size_, origin_)
         pygame.display.flip()
+        return surf
+
+    try:
+        redraw(initial_w, initial_h)
+        clock = pygame.time.Clock()
 
         running = True
         while running:
@@ -273,6 +369,10 @@ def run_demo(game_map: GameMap, *, window_title: str = "Dragonflight — map pre
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
                     break
+                resized = client_size_from_resize_event(event)
+                if resized is not None:
+                    nw, nh = clamp_client_window_size(*resized, desktop)
+                    redraw(nw, nh)
             clock.tick(_FRAME_RATE)
     finally:
         pygame.quit()
