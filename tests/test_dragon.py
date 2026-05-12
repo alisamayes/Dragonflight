@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from dragonflight.dragon import DamageRoundExchange, Dragon, MoveAttempt
+from dragonflight.dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
+from dragonflight.dragon_playables import Blackgon, Greengon, Redgon, new_playable_dragon
 from dragonflight.hex_coord import OffsetCoord, axial_to_offset, neighbours, offset_to_axial
 from dragonflight.map_loader import load_map
 from dragonflight.map_state import GameMap
@@ -37,14 +38,33 @@ def _first_neighbor_on_map(game_map: GameMap, origin: OffsetCoord) -> OffsetCoor
 
 
 class TestDragonDefaults:
-    def test_initializer_stats_match_scaffolding_brief(self) -> None:
+    def test_redgon_factory_matches_dragon_types_doc(self) -> None:
         citadel = OffsetCoord(col=5, row=5)
         dragon = Dragon.new_red_fire_at(citadel)
-        assert dragon.kind.value == "red_fire"
-        assert dragon.hp == 50 == dragon.max_hp
-        assert dragon.atk == dragon.dfn == dragon.flight_range_hexes == 10
-        assert dragon.speed_hexes_per_hour == 10.0
+        assert dragon.kind is DragonKind.RED_FIRE
+        assert isinstance(dragon, Redgon)
+        assert dragon.hp == 500 == dragon.max_hp
+        assert dragon.atk == 120
+        assert dragon.dfn == 90
+        assert dragon.flight_range_hexes == 15
+        assert dragon.speed_hexes_per_hour == 8.0
         assert dragon.hours_remaining == 24.0
+
+    def test_new_playable_dragon_blackgon_stats(self) -> None:
+        citadel = OffsetCoord(col=0, row=0)
+        d = new_playable_dragon(DragonKind.BLACK_TANK, citadel)
+        assert isinstance(d, Blackgon)
+        assert d.max_hp == 500
+        assert d.atk == 100
+        assert d.dfn == 140
+        assert d.flight_range_hexes == 10
+        assert d.speed_hexes_per_hour == 4.0
+
+    def test_greengon_hp_pool(self) -> None:
+        c = OffsetCoord(1, 1)
+        g = new_playable_dragon(DragonKind.GREEN_LIFE, c)
+        assert isinstance(g, Greengon)
+        assert g.max_hp == 600
 
 
 class TestMovement:
@@ -93,8 +113,8 @@ class TestCombatRound:
     def test_attack_round_balances_hours_and_hp(self) -> None:
         citadel = OffsetCoord(10, 10)
         dragon = Dragon.new_red_fire_at(citadel)
-        resolved = dragon.attack_round_vs_target(target_hp=30, target_atk=4, target_dfn=8)
+        resolved = dragon.attack_round_vs_target(target_hp=300, target_atk=4, target_dfn=8)
         assert isinstance(resolved, DamageRoundExchange)
         assert resolved.damage_to_dragon == 0
-        assert resolved.damage_to_target == 2  # atk 10 - dfn 8, dragon floors at ≥1 → 2
+        assert resolved.damage_to_target == 112  # atk 120 - dfn 8
         assert dragon.hours_remaining == 24.0 - 0.5

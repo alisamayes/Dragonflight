@@ -1,9 +1,10 @@
 """Interactive map session — Pygame (pygame required).
 
-Launched by default from ``python -m dragonflight`` (see ``__main__``). Click
-reachable hexes to move the dragon from the bundled citadel. Invalid tiles
-(due to flight range or mandatory return to citadel on the daily clock) are
-drawn muted. A 24-segment hour bar at the top tracks remaining daylight.
+Launched by default from ``python -m dragonflight`` (see ``__main__``): main menu,
+then new-game map and dragon selection, then the movement playtest. Click
+reachable hexes to move the dragon from the citadel. Invalid tiles (flight range
+or mandatory return to citadel on the daily clock) are drawn muted. A 24-segment
+hour bar tracks remaining daylight.
 
 This module couples presentation with :class:`~dragonflight.dragon.Dragon` for
 the runnable prototype. A static map-only window is :func:`render.run_demo`.
@@ -20,8 +21,14 @@ from pathlib import Path
 
 import pygame
 
-from .dragon import Dragon
+from .dragon import Dragon, DragonKind
 from .dragon_defaults import HOURS_PER_DRAGON_DAY
+from .dragon_playables import (
+    default_playable_kind,
+    display_name_for_kind,
+    new_playable_dragon,
+    playable_dragon_kinds,
+)
 from .hex_coord import HEX_CORNERS, OffsetCoord, offset_to_pixel
 from .hour_bar_layout import hour_bar_segment_layout
 from .map_loader import MapLoadError, load_map
@@ -414,17 +421,27 @@ def _draw_hour_bar(surface: pygame.Surface, hours_remaining: float, bar_width: i
 
 
 def run_movement_playtest(
-    game_map: GameMap,
+    game_map: GameMap | None = None,
     *,
     window_title: str = "Dragonflight",
 ) -> None:
-    """Open a resizable window with the map, dragon dot, reachability tinting, and hour bar.
+    """Open a resizable Pygame window.
 
-    Map hex size scales to the map viewport (everything below the time bar) within
-    :data:`~dragonflight.render.MIN_CLIENT_*` and the primary desktop resolution.
+    When ``game_map`` is ``None`` (default for ``python -m dragonflight``), the
+    flow is: **Main menu** → **Start Game** → pick a map under ``assets/`` → pick
+    a dragon type → then the movement playtest session.
+
+    If ``game_map`` is provided, menus are skipped and play starts immediately
+    with the default first playable dragon kind (for programmatic / test use).
     """
-    citadel_coord = _find_citadel_coord(game_map)
-    dragon = Dragon.new_red_fire_at(citadel_coord)
+    citadel_coord: OffsetCoord | None = None
+    dragon: Dragon | None = None
+    session_dragon_kind: DragonKind = default_playable_kind()
+    skip_menus = game_map is not None
+    if skip_menus:
+        assert game_map is not None
+        citadel_coord = _find_citadel_coord(game_map)
+        dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
 
     pygame.init()
     pygame.display.init()
@@ -442,23 +459,34 @@ def run_movement_playtest(
         cap_w = max(MIN_CLIENT_WIDTH, desktop[0] - reserve_px)
         cap_h = max(MIN_CLIENT_HEIGHT, desktop[1] - reserve_px)
 
-        natural_hex = compute_render_hex_size(game_map)
-        natural_map_w, natural_map_h = compute_window_size(game_map, natural_hex)
-        natural_win_w = natural_map_w
-        natural_win_h = natural_map_h + TIME_BAR_HEIGHT
+        _MENU_FALLBACK_W = 960
+        _MENU_FALLBACK_H = 640
 
-        initial_w = min(max(natural_win_w, MIN_CLIENT_WIDTH), cap_w)
-        initial_h = min(max(natural_win_h, MIN_CLIENT_HEIGHT), cap_h)
+        if skip_menus:
+            assert game_map is not None
+            gm_boot: GameMap = game_map
+            natural_hex = compute_render_hex_size(gm_boot)
+            natural_map_w, natural_map_h = compute_window_size(gm_boot, natural_hex)
+            natural_win_w = natural_map_w
+            natural_win_h = natural_map_h + TIME_BAR_HEIGHT
+            initial_w = min(max(natural_win_w, MIN_CLIENT_WIDTH), cap_w)
+            initial_h = min(max(natural_win_h, MIN_CLIENT_HEIGHT), cap_h)
+            hex_size = float(natural_hex)
+        else:
+            initial_w = min(max(_MENU_FALLBACK_W, MIN_CLIENT_WIDTH), cap_w)
+            initial_h = min(max(_MENU_FALLBACK_H, MIN_CLIENT_HEIGHT), cap_h)
+            hex_size = 30.0
 
         win_w = initial_w
         win_h = initial_h
-        hex_size = float(natural_hex)
         origin: tuple[float, float] = (0.0, 0.0)
 
         def apply_layout(client_w: int, client_h: int) -> None:
             """Recompute hex size and origin for a client-area size."""
             nonlocal win_w, win_h, hex_size, origin
             win_w, win_h = client_w, client_h
+            if game_map is None:
+                return
             map_h = max(1, client_h - TIME_BAR_HEIGHT)
             hs, (ox, oy), _ = layout_map_on_canvas(game_map, client_w, map_h)
             hex_size = hs
@@ -474,7 +502,12 @@ def run_movement_playtest(
         apply_layout(initial_w, initial_h)
 
         day_index = 1
-        screen: str = "game"  # game | settings | map_creator_setup | map_creator_editor
+        # Screens: main_menu, new_game_maps, new_game_dragon, game, settings,
+        # map_creator_setup, map_creator_editor
+        screen: str = "game" if skip_menus else "main_menu"
+        new_game_map_scroll: int = 0
+        new_game_status: str = ""
+        pending_map_path: Path | None = None
         focused_field: str | None = None  # dims | name
         settings_status: str = ""
 
@@ -532,6 +565,28 @@ def run_movement_playtest(
                 return None
             return Path(file_path)
 
+        def _list_map_files_in_assets() -> list[Path]:
+            """Return sorted ``*.json`` map paths confined to ``assets/``."""
+            assets = _assets_dir()
+            try:
+                assets.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            try:
+                assets_resolved = assets.resolve()
+            except OSError:
+                return []
+            safe: list[Path] = []
+            for candidate in sorted(assets.glob("*.json")):
+                if not candidate.is_file():
+                    continue
+                try:
+                    candidate.resolve().relative_to(assets_resolved)
+                except ValueError:
+                    continue
+                safe.append(candidate)
+            return safe
+
         def _load_map_from_assets_path(path: Path) -> tuple[bool, str]:
             """Load a map file, refusing paths outside assets/."""
             try:
@@ -556,22 +611,164 @@ def run_movement_playtest(
             nonlocal game_map, citadel_coord, dragon, day_index, screen, settings_status
             game_map = new_map
             citadel_coord = _find_citadel_coord(game_map)
-            dragon = Dragon.new_red_fire_at(citadel_coord)
+            dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
             day_index = 1
             settings_status = ""
             # Re-fit the map to current window.
             apply_layout(win_w, win_h)
             screen = "game"
 
+        def _begin_play_session_from_pending_map() -> tuple[bool, str]:
+            """Load ``pending_map_path`` with ``session_dragon_kind`` and enter ``game``."""
+            nonlocal game_map, citadel_coord, dragon, day_index, screen
+            nonlocal settings_status, new_game_status
+            if pending_map_path is None:
+                return False, "No map selected."
+            try:
+                assets_resolved = _assets_dir().resolve()
+                selected_resolved = pending_map_path.resolve()
+                selected_resolved.relative_to(assets_resolved)
+            except Exception:
+                return False, "Map file must be inside assets/."
+
+            try:
+                new_map = load_map(selected_resolved)
+            except MapLoadError as exc:
+                return False, f"Failed to load map: {exc}"
+            except OSError as exc:
+                return False, f"Failed to read file: {exc}"
+
+            game_map = new_map
+            citadel_coord = _find_citadel_coord(game_map)
+            dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
+            day_index = 1
+            settings_status = ""
+            new_game_status = ""
+            apply_layout(win_w, win_h)
+            screen = "game"
+            return True, ""
+
         def redraw() -> None:
             surf = pygame.display.get_surface()
             surf.fill(BACKGROUND_COLOR)
 
-            if screen == "game":
+            if screen == "main_menu":
+                surf.fill(_UI_BG_RGB)
+                _draw_text(surf, font_big, "Dragonflight", (win_w // 2 - 120, win_h // 2 - 120), _UI_TEXT_RGB)
+                mx, my = pygame.mouse.get_pos()
+                btn_start = pygame.Rect(win_w // 2 - 110, win_h // 2 - 28, 220, 48)
+                _draw_button(
+                    surf,
+                    font_mid,
+                    btn_start,
+                    "Start Game",
+                    hovered=btn_start.collidepoint(mx, my),
+                )
+                _draw_text(
+                    surf,
+                    font,
+                    "Esc — quit",
+                    (24, win_h - 36),
+                    _UI_MUTED_TEXT_RGB,
+                )
+
+            elif screen == "new_game_maps":
+                surf.fill(_UI_BG_RGB)
+                _draw_text(surf, font_big, "Choose a map", (60, 48), _UI_TEXT_RGB)
+                _draw_text(
+                    surf,
+                    font,
+                    "JSON files in assets/",
+                    (60, 88),
+                    _UI_MUTED_TEXT_RGB,
+                )
+                mx, my = pygame.mouse.get_pos()
+                btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                _draw_button(surf, font_mid, btn_back, "Back", hovered=btn_back.collidepoint(mx, my))
+
+                list_rect = pygame.Rect(40, 120, win_w - 80, win_h - 210)
+                pygame.draw.rect(surf, _UI_PANEL_RGB, list_rect, border_radius=8)
+                pygame.draw.rect(surf, _UI_BORDER_RGB, list_rect, width=1, border_radius=8)
+
+                maps = _list_map_files_in_assets()
+                if not maps:
+                    _draw_text(
+                        surf,
+                        font,
+                        "No .json maps found in assets/. Add a map or use Map Creator.",
+                        (list_rect.x + 16, list_rect.y + 20),
+                        _UI_MUTED_TEXT_RGB,
+                    )
+                else:
+                    row_h = 38
+                    y = list_rect.y + 8 - new_game_map_scroll
+                    for path in maps:
+                        pick_rect = pygame.Rect(list_rect.x + 8, y, list_rect.w - 16, row_h - 4)
+                        y += row_h
+                        if pick_rect.bottom < list_rect.top or pick_rect.top > list_rect.bottom:
+                            continue
+                        hovered = pick_rect.collidepoint(mx, my)
+                        sel = (
+                            pending_map_path is not None
+                            and path.resolve() == pending_map_path.resolve()
+                        )
+                        _draw_button(surf, font, pick_rect, path.name, hovered=hovered, active=sel)
+
+                if new_game_status:
+                    _draw_text(surf, font, new_game_status, (60, win_h - 110), (240, 120, 120))
+
+            elif screen == "new_game_dragon":
+                surf.fill(_UI_BG_RGB)
+                title = "Choose your dragon"
+                if pending_map_path is not None:
+                    title = f"{title} — {pending_map_path.name}"
+                _draw_text(surf, font_big, title, (60, 40), _UI_TEXT_RGB)
+                mx, my = pygame.mouse.get_pos()
+                btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                _draw_button(surf, font_mid, btn_back, "Back", hovered=btn_back.collidepoint(mx, my))
+
+                y0 = 110
+                for i, kind in enumerate(playable_dragon_kinds()):
+                    d_row = pygame.Rect(60, y0 + i * 46, min(520, win_w - 120), 40)
+                    hovered = d_row.collidepoint(mx, my)
+                    active = kind is session_dragon_kind
+                    _draw_button(
+                        surf,
+                        font_mid,
+                        d_row,
+                        display_name_for_kind(kind),
+                        hovered=hovered,
+                        active=active,
+                    )
+
+                btn_play = pygame.Rect(60, y0 + len(playable_dragon_kinds()) * 46 + 24, 200, 44)
+                can_play = pending_map_path is not None
+                _draw_button(
+                    surf,
+                    font_mid,
+                    btn_play,
+                    "Play",
+                    hovered=can_play and btn_play.collidepoint(mx, my),
+                    active=False,
+                )
+                if not can_play:
+                    _draw_text(
+                        surf,
+                        font,
+                        "Select a map first (Back).",
+                        (btn_play.right + 16, btn_play.y + 12),
+                        _UI_MUTED_TEXT_RGB,
+                    )
+
+                if new_game_status:
+                    _draw_text(surf, font, new_game_status, (60, win_h - 110), (240, 120, 120))
+
+            elif screen == "game" and game_map is not None and dragon is not None:
+                assert citadel_coord is not None
                 caption = font.render(
                     (
-                        f"Day {day_index}  |  Green bar = hours left  |  Muted = unreachable  |  "
-                        "Citadel = new day"
+                        f"Day {day_index}  |  {display_name_for_kind(dragon.kind)}  |  "
+                        "Green bar = hours left  |  Muted = unreachable  |  Citadel = new day"
                     ),
                     True,
                     (210, 210, 220),
@@ -634,15 +831,21 @@ def run_movement_playtest(
                     _draw_text(surf, font, draft.error, (60, 380), (240, 120, 120))
 
             elif screen == "map_creator_editor" and editor is not None:
+                ed = editor
                 surf.fill(_UI_BG_RGB)
-                _draw_text(surf, font_big, f"Map Creator — {editor.name}", (24, 18), _UI_TEXT_RGB)
+                _draw_text(surf, font_big, f"Map Creator — {ed.name}", (24, 18), _UI_TEXT_RGB)
 
                 toolbar_w = 240
                 top_pad = 70
                 bottom_pad = SETTINGS_BAR_HEIGHT
 
                 map_view = pygame.Rect(0, top_pad, win_w - toolbar_w, win_h - top_pad - bottom_pad)
-                toolbar = pygame.Rect(win_w - toolbar_w, top_pad, toolbar_w, win_h - top_pad - bottom_pad)
+                toolbar = pygame.Rect(
+                    win_w - toolbar_w,
+                    top_pad,
+                    toolbar_w,
+                    win_h - top_pad - bottom_pad,
+                )
                 bottom = pygame.Rect(0, win_h - SETTINGS_BAR_HEIGHT, win_w, SETTINGS_BAR_HEIGHT)
 
                 pygame.draw.rect(surf, _UI_PANEL_RGB, toolbar)
@@ -651,12 +854,12 @@ def run_movement_playtest(
                 pygame.draw.rect(surf, _UI_BORDER_RGB, bottom, width=1)
 
                 tiles: dict[OffsetCoord, Tile] = {}
-                for coord, terr in editor.tiles.items():
+                for coord, terr in ed.tiles.items():
                     terrain = Terrain.GRASSLAND if terr is None else terr
                     tiles[coord] = Tile(coord=coord, terrain=terrain)
                 edit_map = GameMap(
-                    width=editor.width,
-                    height=editor.height,
+                    width=ed.width,
+                    height=ed.height,
                     hex_size=float(_DEFAULT_HEX_SIZE_HINT),
                     orientation="flat",
                     tiles=tiles,
@@ -666,7 +869,7 @@ def run_movement_playtest(
                 origin_edit = (ox + float(map_view.x), oy + float(map_view.y))
 
                 def tile_color(tile: Tile) -> tuple[int, int, int]:
-                    terr = editor.tiles.get(tile.coord)
+                    terr = ed.tiles.get(tile.coord)
                     if terr is None:
                         return TERRAIN_COLORS[Terrain.GRASSLAND]
                     return TERRAIN_COLORS[tile.terrain]
@@ -689,7 +892,7 @@ def run_movement_playtest(
                 for label, terr in _tile_types_for_toolbar():
                     r = pygame.Rect(toolbar.x + 14, y, toolbar.w - 28, button_h)
                     hovered = r.collidepoint(mx, my)
-                    active = editor.selected is terr
+                    active = ed.selected is terr
                     _draw_button(surf, font, r, label, hovered=hovered, active=active)
                     y += button_h + 10
 
@@ -699,8 +902,8 @@ def run_movement_playtest(
                 btn_back = pygame.Rect(win_w - 130, win_h - SETTINGS_BAR_HEIGHT + 10, 110, 36)
                 _draw_button(surf, font_mid, btn_back, "Back", hovered=btn_back.collidepoint(mx, my))
 
-                if editor.status:
-                    _draw_text(surf, font, editor.status, (24, win_h - SETTINGS_BAR_HEIGHT + 18), _UI_TEXT_RGB)
+                if ed.status:
+                    _draw_text(surf, font, ed.status, (24, win_h - SETTINGS_BAR_HEIGHT + 18), _UI_TEXT_RGB)
 
             pygame.display.flip()
 
@@ -713,12 +916,33 @@ def run_movement_playtest(
                     running = False
                     break
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    if screen == "main_menu":
+                        running = False
+                        break
+                    if screen == "new_game_maps":
+                        screen = "main_menu"
+                        new_game_map_scroll = 0
+                        new_game_status = ""
+                        pending_map_path = None
+                        redraw()
+                        continue
+                    if screen == "new_game_dragon":
+                        screen = "new_game_maps"
+                        new_game_status = ""
+                        redraw()
+                        continue
                     if screen == "game":
                         running = False
                         break
+                    if screen == "map_creator_editor":
+                        editor = None
                     screen = "game"
                     focused_field = None
                     draft.error = ""
+                    redraw()
+                    continue
+                if event.type == pygame.MOUSEWHEEL and screen == "new_game_maps":
+                    new_game_map_scroll = max(0, new_game_map_scroll - event.y * 24)
                     redraw()
                     continue
                 resized = client_size_from_resize_event(event)
@@ -750,20 +974,97 @@ def run_movement_playtest(
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = event.pos
 
-                    if screen == "game":
-                        settings_btn = pygame.Rect(win_w - 140, win_h - SETTINGS_BAR_HEIGHT + 10, 120, 36)
+                    if screen == "main_menu":
+                        btn_start = pygame.Rect(win_w // 2 - 110, win_h // 2 - 28, 220, 48)
+                        if btn_start.collidepoint(mx, my):
+                            screen = "new_game_maps"
+                            new_game_map_scroll = 0
+                            new_game_status = ""
+                            pending_map_path = None
+                            redraw()
+                        continue
+
+                    if screen == "new_game_maps":
+                        btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                        if btn_back.collidepoint(mx, my):
+                            screen = "main_menu"
+                            new_game_map_scroll = 0
+                            new_game_status = ""
+                            pending_map_path = None
+                            redraw()
+                            continue
+                        list_rect = pygame.Rect(40, 120, win_w - 80, win_h - 210)
+                        maps = _list_map_files_in_assets()
+                        row_h = 38
+                        y = list_rect.y + 8 - new_game_map_scroll
+                        picked_path: Path | None = None
+                        for path in maps:
+                            pick_rect = pygame.Rect(list_rect.x + 8, y, list_rect.w - 16, row_h - 4)
+                            y += row_h
+                            if pick_rect.collidepoint(mx, my) and list_rect.collidepoint(mx, my):
+                                picked_path = path
+                                break
+                        if picked_path is not None:
+                            pending_map_path = picked_path
+                            new_game_status = ""
+                            screen = "new_game_dragon"
+                            redraw()
+                        continue
+
+                    if screen == "new_game_dragon":
+                        btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                        if btn_back.collidepoint(mx, my):
+                            screen = "new_game_maps"
+                            new_game_status = ""
+                            redraw()
+                            continue
+                        y0 = 110
+                        clicked_kind: DragonKind | None = None
+                        for i, kind in enumerate(playable_dragon_kinds()):
+                            d_row = pygame.Rect(60, y0 + i * 46, min(520, win_w - 120), 40)
+                            if d_row.collidepoint(mx, my):
+                                clicked_kind = kind
+                                break
+                        if clicked_kind is not None:
+                            session_dragon_kind = clicked_kind
+                            new_game_status = ""
+                            redraw()
+                            continue
+                        btn_play = pygame.Rect(60, y0 + len(playable_dragon_kinds()) * 46 + 24, 200, 44)
+                        if btn_play.collidepoint(mx, my) and pending_map_path is not None:
+                            ok, err = _begin_play_session_from_pending_map()
+                            if not ok:
+                                new_game_status = err
+                            redraw()
+                        continue
+
+                    in_play_session = (
+                        screen == "game"
+                        and game_map is not None
+                        and dragon is not None
+                        and citadel_coord is not None
+                    )
+                    if in_play_session:
+                        assert game_map is not None and dragon is not None and citadel_coord is not None
+                        gmap, dgn, ccd = game_map, dragon, citadel_coord
+                        settings_btn = pygame.Rect(
+                            win_w - 140,
+                            win_h - SETTINGS_BAR_HEIGHT + 10,
+                            120,
+                            36,
+                        )
                         if settings_btn.collidepoint(mx, my):
                             screen = "settings"
                             redraw()
                             continue
                         if my < TIME_BAR_HEIGHT or my > win_h - SETTINGS_BAR_HEIGHT:
                             continue
-                        picked = _pick_tile_at_pixel(float(mx), float(my), game_map, hex_size, origin)
+                        picked = _pick_tile_at_pixel(float(mx), float(my), gmap, hex_size, origin)
                         if picked is None:
                             continue
-                        outcome = dragon.move(picked, game_map, citadel_coord)
-                        if outcome.ok and dragon.position == citadel_coord:
-                            dragon.begin_new_day_at_citadel(citadel_coord)
+                        outcome = dgn.move(picked, gmap, ccd)
+                        if outcome.ok and dgn.position == ccd:
+                            dgn.begin_new_day_at_citadel(ccd)
                             day_index += 1
                         redraw()
                         continue
@@ -880,16 +1181,20 @@ def run_movement_playtest(
                                 continue
 
                             if map_view.collidepoint(mx, my):
-                                tiles: dict[OffsetCoord, Tile] = {}
-                                for coord, terr in editor.tiles.items():
-                                    terrain = Terrain.GRASSLAND if terr is None else terr
-                                    tiles[coord] = Tile(coord=coord, terrain=terrain)
+                                paint_tiles: dict[OffsetCoord, Tile] = {}
+                                for coord in editor.tiles:
+                                    cell = editor.tiles.get(coord)
+                                    if cell is None:
+                                        cell_terrain = Terrain.GRASSLAND
+                                    else:
+                                        cell_terrain = cell
+                                    paint_tiles[coord] = Tile(coord=coord, terrain=cell_terrain)
                                 edit_map = GameMap(
                                     width=editor.width,
                                     height=editor.height,
                                     hex_size=float(_DEFAULT_HEX_SIZE_HINT),
                                     orientation="flat",
-                                    tiles=tiles,
+                                    tiles=paint_tiles,
                                 )
                                 hs, (ox, oy), _ = layout_map_on_canvas(edit_map, map_view.w, map_view.h)
                                 origin_edit = (ox + float(map_view.x), oy + float(map_view.y))

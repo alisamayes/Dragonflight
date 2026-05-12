@@ -39,6 +39,10 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+# Pygame UI helpers use many long single-call lines; keep other rules strict.
+[tool.ruff.lint.per-file-ignores]
+"src/dragonflight/movement_playtest.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 check_untyped_defs = true

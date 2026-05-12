@@ -30,11 +30,13 @@ if TYPE_CHECKING:
 
 
 class DragonKind(Enum):
-    """Playable dragon archetypes (spec §7). MVP builds only exercise ``RED_FIRE``."""
+    """Playable dragon archetypes (spec §7 + ``Documentation/dragon_types.md``)."""
 
     RED_FIRE = "red_fire"
     BLACK_TANK = "black_tank"
+    GREEN_LIFE = "green_life"
     YELLOW_CHRONO = "yellow_chrono"
+    PURPLE_FROST = "purple_frost"
     BROWN_EARTH = "brown_earth"
 
 
@@ -88,19 +90,10 @@ class Dragon:
 
     @classmethod
     def new_red_fire_at(cls, citadel_coord: OffsetCoord) -> Dragon:
-        """Factory for the MVP Red Fire Dragon sitting on the citadel at day start."""
-        return cls(
-            kind=DragonKind.RED_FIRE,
-            position=citadel_coord,
-            level=DEFAULT_DRAGON_LEVEL,
-            hp=DEFAULT_DRAGON_MAX_HP,
-            max_hp=DEFAULT_DRAGON_MAX_HP,
-            atk=DEFAULT_DRAGON_ATK,
-            dfn=DEFAULT_DRAGON_DFN,
-            flight_range_hexes=DEFAULT_DRAGON_FLIGHT_RANGE_HEXES,
-            speed_hexes_per_hour=DEFAULT_DRAGON_SPEED_HEXES_PER_HOUR,
-            hours_remaining=HOURS_PER_DRAGON_DAY,
-        )
+        """Factory for the Redgon (red fire) dragon at the citadel (see ``dragon_playables``)."""
+        from .dragon_playables import Redgon
+
+        return Redgon.new_at(citadel_coord)
 
     def begin_new_day_at_citadel(self, citadel_coord: OffsetCoord) -> None:
         """Phase boundary helper: reset daily hours and teleport home (spec §2 phase 5 → 1).
