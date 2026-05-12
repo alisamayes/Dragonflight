@@ -24,15 +24,17 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from .hex_coord import OffsetCoord
+from .settlement import SettlementType
 from .terrain import Terrain
 
 
 @dataclass(frozen=True, slots=True)
 class Tile:
-    """A single hex tile: its coordinate plus the terrain occupying it."""
+    """A single hex tile: coordinate, terrain, and optional settlement subtype."""
 
     coord: OffsetCoord
     terrain: Terrain
+    settlement_kind: SettlementType | None = None
 
 
 @dataclass(frozen=True, slots=True)

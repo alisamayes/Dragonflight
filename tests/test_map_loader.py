@@ -12,6 +12,7 @@ import pytest
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_loader import MapLoadError, load_map
 from dragonflight.map_state import GameMap
+from dragonflight.settlement import SettlementType
 from dragonflight.terrain import Terrain
 
 # --- Test fixtures ----------------------------------------------------------
@@ -97,6 +98,41 @@ class TestExampleMapShape:
         tile = example_map.get(citadel_coord)
         assert tile is not None, "no tile at the expected citadel coordinate"
         assert tile.terrain is Terrain.CITADEL
+
+    def test_settlement_tiles_default_to_village_without_json_field(
+        self, example_map: GameMap
+    ) -> None:
+        st = example_map.get(OffsetCoord(2, 2))
+        assert st is not None
+        assert st.terrain is Terrain.SETTLEMENT
+        assert st.settlement_kind is SettlementType.VILLAGE
+
+
+class TestSettlementTypeJson:
+    def test_explicit_city_on_settlement_tile(self, tmp_path: Path) -> None:
+        def mutate(raw: dict[str, Any]) -> None:
+            key = "2,2,surface"
+            assert key in raw["hexes"]
+            assert raw["hexes"][key]["hexType"] == "custom-5c5b120e"
+            raw["hexes"][key]["settlementType"] = "city"
+
+        path = _write_mutated_map(tmp_path, mutate, name="with_city.json")
+        gm = load_map(path)
+        tile = gm.get(OffsetCoord(2, 2))
+        assert tile is not None
+        assert tile.settlement_kind is SettlementType.CITY
+
+    def test_invalid_settlement_type_raises(self, tmp_path: Path) -> None:
+        def mutate(raw: dict[str, Any]) -> None:
+            key = "2,2,surface"
+            assert key in raw["hexes"]
+            raw["hexes"][key]["settlementType"] = "metropolis"
+
+        path = _write_mutated_map(tmp_path, mutate, name="bad_settle_type.json")
+        with pytest.raises(MapLoadError) as exc_info:
+            load_map(path)
+        assert "settlementType" in str(exc_info.value)
+        assert "(2, 2)" in str(exc_info.value)
 
 
 # --- Failure-path tests -----------------------------------------------------

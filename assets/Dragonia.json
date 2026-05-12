@@ -1355,7 +1355,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "city"
     },
     "2,48,surface": {
       "q": 2,
@@ -1410,7 +1411,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "village"
     },
     "3,4,surface": {
       "q": 3,
@@ -3356,7 +3358,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "city"
     },
     "7,19,surface": {
       "q": 7,
@@ -5334,7 +5337,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "fort"
     },
     "11,36,surface": {
       "q": 11,
@@ -10581,7 +10585,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "village"
     },
     "23,8,surface": {
       "q": 23,
@@ -12688,7 +12693,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "village"
     },
     "27,40,surface": {
       "q": 27,
@@ -19018,7 +19024,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "fort"
     },
     "41,36,surface": {
       "q": 41,
@@ -20198,7 +20205,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "fort"
     },
     "44,16,surface": {
       "q": 44,
@@ -20545,7 +20553,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "city"
     },
     "45,4,surface": {
       "q": 45,
@@ -20937,7 +20946,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "city"
     },
     "45,47,surface": {
       "q": 45,
@@ -21657,7 +21667,8 @@
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#fff705"
+      "customColor": "#fff705",
+      "settlementType": "village"
     },
     "47,26,surface": {
       "q": 47,
@@ -22812,5 +22823,5 @@
   "activeLayer": "surface",
   "schemaVersion": 3,
   "createdAt": "2026-05-11T08:49:31.597Z",
-  "updatedAt": "2026-05-11T09:09:06.254Z"
+  "updatedAt": "2026-05-12T12:05:59.016Z"
 }

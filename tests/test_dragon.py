@@ -37,6 +37,18 @@ def _first_neighbor_on_map(game_map: GameMap, origin: OffsetCoord) -> OffsetCoor
     raise AssertionError("could not locate neighbour tile")
 
 
+class TestDragonHp:
+    def test_current_hp_mirrors_hp_and_clamps_to_max(self) -> None:
+        dragon = Dragon(DragonKind.RED_FIRE, OffsetCoord(0, 0), hp=100, max_hp=200)
+        assert dragon.current_hp == dragon.hp == 100
+        dragon.current_hp = 150
+        assert dragon.hp == 150
+        dragon.current_hp = 999
+        assert dragon.hp == 200
+        dragon.current_hp = -5
+        assert dragon.hp == 0
+
+
 class TestDragonDefaults:
     def test_redgon_factory_matches_dragon_types_doc(self) -> None:
         citadel = OffsetCoord(col=5, row=5)
@@ -115,6 +127,60 @@ class TestCombatRound:
         dragon = Dragon.new_red_fire_at(citadel)
         resolved = dragon.attack_round_vs_target(target_hp=300, target_atk=4, target_dfn=8)
         assert isinstance(resolved, DamageRoundExchange)
-        assert resolved.damage_to_dragon == 0
-        assert resolved.damage_to_target == 112  # atk 120 - dfn 8
+        assert resolved.damage_to_dragon == 2  # 4 * 100 // (100 + 90)
+        assert resolved.damage_to_target == 111  # 120 * 100 // (100 + 8)
         assert dragon.hours_remaining == 24.0 - 0.5
+
+
+class TestCitadelEndOfDayHealing:
+    def test_low_hp_ten_hours_matches_design_example(self) -> None:
+        citadel = OffsetCoord(0, 0)
+        dragon = Dragon(DragonKind.RED_FIRE, citadel, hp=50, max_hp=500)
+        dragon.hours_remaining = 10.0
+
+        dragon.begin_new_day_at_citadel(citadel)
+
+        assert dragon.hp == 400
+        assert dragon.hours_remaining == 24.0
+        assert dragon.position == citadel
+
+    def test_healing_clamps_to_max_hp(self) -> None:
+        citadel = OffsetCoord(1, 0)
+        dragon = Dragon(DragonKind.RED_FIRE, citadel, hp=490, max_hp=500)
+        dragon.hours_remaining = 10.0
+
+        dragon.begin_new_day_at_citadel(citadel)
+
+        assert dragon.hp == 500
+
+    def test_zero_hours_remaining_heals_base_only(self) -> None:
+        citadel = OffsetCoord(2, 0)
+        dragon = Dragon(DragonKind.RED_FIRE, citadel, hp=10, max_hp=100)
+        dragon.hours_remaining = 0.0
+
+        dragon.begin_new_day_at_citadel(citadel)
+
+        assert dragon.hp == 60
+
+
+class TestDamageRoundReturnHome:
+    def test_validates_when_slack_insufficient_after_round(self) -> None:
+        dragon = Dragon(
+            DragonKind.RED_FIRE,
+            OffsetCoord(0, 0),
+            hours_remaining=0.5,
+            speed_hexes_per_hour=10.0,
+        )
+        blocked = dragon.validate_damage_round_preserves_return_to_citadel(OffsetCoord(5, 0))
+        assert not blocked.ok
+        assert "citadel" in blocked.reason.lower()
+
+    def test_validates_ok_when_home_reachable_after_round(self) -> None:
+        dragon = Dragon(
+            DragonKind.RED_FIRE,
+            OffsetCoord(0, 0),
+            hours_remaining=0.5,
+            speed_hexes_per_hour=10.0,
+        )
+        ok = dragon.validate_damage_round_preserves_return_to_citadel(OffsetCoord(0, 0))
+        assert ok.ok

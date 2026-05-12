@@ -71,6 +71,7 @@ Per-tile fields:
 | `edgeData` | object | yes | Reserved for per-edge attributes (e.g. cliffs, river segments). Currently `{}`. |
 | `connections` | array | yes | Reserved for explicit graph edges (rare overrides). Currently `[]`. |
 | `customColor` | string (hex) | optional | Present on tiles whose `hexType` is a custom type, mirroring the type's `color`. Used by the renderer when a tile carries a custom hex type so colour state survives editor moves. |
+| `settlementType` | string | optional | Only on **Settlement** terrain (`hexType` resolving to the Settlement custom type). One of `village`, `city`, `fort` (case-insensitive). If omitted, the loader treats the tile as a **village**. Non-settlement tiles may omit this field; if present on other terrain, the loader ignores it. |
 
 ### Coordinate semantics of `q` and `r`
 
@@ -169,7 +170,7 @@ The following `name` values are reserved and have gameplay meaning:
 
 - `Bridge` → `BRIDGE` — allows armies to cross adjacent `River` tiles (spec §5).
 - `Citadel` → `CITADEL` — the dragon's home base; failure condition tile (spec §10).
-- `Settlement` → `SETTLEMENT` — generic settlement tile. Sub-types (Village, City, Fort) are deferred per spec §6 and are not part of this schema yet.
+- `Settlement` → `SETTLEMENT` — settlement tile. Subtype is set per-hex via optional `settlementType` (`village` \| `city` \| `fort`); see §3.
 - `River` → `RIVER` — impassable to armies except via `Bridge` tiles (spec §5).
 
 Names not listed above are unknown; the loader **fails map load** with a clear

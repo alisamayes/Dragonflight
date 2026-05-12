@@ -51,7 +51,7 @@ If an action would prevent returning to the citadel in time, the action is inval
 Once the dragon returns:
 - Gold may be spent on upgrades
 - Citadel repairs may be purchased
-- Dragon HP recovery occurs: **restore 50% of max HP** per day at the citadel for MVP (later systems may modify healing rates)
+- Dragon HP recovery when docking for the night: **50% of max HP** as a base, **plus 2% of max HP for each whole or fractional hour** still remaining on the dragon's daily clock (e.g. 10% current HP, 10 hours left → 50% + 20% = **70% of max HP** healed, landing at **80% of max** if unclamped). Result is clamped to max HP. (Later systems may modify these rates.)
 
 Citadel repair costs:
 - **Static but expensive** baseline cost (exact value tuned during development)
@@ -195,7 +195,7 @@ Game over immediately triggers when either condition occurs.
 Each settlement contains:
 - HP
 - Economy (eco)
-- Power
+- Attack
 - Defence
 - Aggression
 - Aggression threshold
@@ -210,6 +210,10 @@ Each turn settlements:
 - Recover eco
 - Recover power
 - Increase wealth slowly over time
+
+MVP simulation detail (aligned with code):
+- **Damaged** settlements (current HP below max): heal only that tick — **40% of max HP** when still alive but hurt; **80% of max HP** when current HP is **0** (rebuilding from collapse). No eco or combat-stat growth on that same tick.
+- **Undamaged** settlements (at full HP): gain **eco** and **ATK/DFN** growth ticks without raising max HP or current HP.
 
 If heavily damaged:
 - Recovery prioritizes rebuilding over growth
@@ -326,13 +330,15 @@ Stronger enemies tend to force more rounds before victory; weaker enemies end so
 ---
 
 ## Damage calculation
-Per damage round, both sides can take damage from the exchange:
+Per damage round, both sides can take damage from the exchange.
 
-**Damage taken = attacker ATK − defender DFN**
+**Base damage (integer division):**
+
+`damage = attacker_ATK * 100 // (100 + defender_DFN)`
 
 ### Damage floors
-- **Human / army attacks:** damage dealt **floors at 0** (negative results become 0)
-- **Dragon attacks:** damage dealt **floors at 1** (the dragon always deals at least 1 damage when it attacks)
+- **Human / army attacks:** use the base damage above; results **floor at 0** (including when attack is 0)
+- **Dragon attacks:** use the same base damage, then apply **minimum 1** — `max(1, base_damage)` so MVP dragon strikes never deal less than 1
 
 ---
 

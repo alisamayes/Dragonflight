@@ -27,6 +27,10 @@ Resolution rules (spec §5; ``Documentation/map-schema.md`` §5–§7):
 3. Anything else (``ocean``, ``sea``, typos, unknown custom names) raises
    ``MapLoadError`` so authors notice — never silently coerce.
 
+4. Settlement terrain may carry optional ``settlementType`` (``village`` /
+   ``city`` / ``fort``); omitted means ``village``. Non-settlement tiles ignore
+   a stray ``settlementType`` field.
+
 Security posture (round Wave-2-revision-1, Security L1 fix): every numeric
 field on the Pydantic boundary models has an explicit upper bound, and the
 top-level ``hexes`` mapping is rejected up-front if it exceeds the
@@ -43,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .hex_coord import OffsetCoord
 from .map_state import GameMap, Tile
+from .settlement import SettlementType
 from .terrain import Terrain
 
 # --- Loader policy constants (no magic numbers in resolution code) ----------
@@ -115,6 +120,13 @@ _CUSTOM_NAME_TO_TERRAIN: dict[str, Terrain] = {
     "river": Terrain.RIVER,
 }
 
+#: Per-tile ``settlementType`` JSON strings (lowercase) → enum (schema §3 extension).
+_SETTLEMENT_TYPE_JSON: dict[str, SettlementType] = {
+    "village": SettlementType.VILLAGE,
+    "city": SettlementType.CITY,
+    "fort": SettlementType.FORT,
+}
+
 
 class MapLoadError(ValueError):
     """Raised when a map file is unreadable, malformed, or fails Slice 1 rules.
@@ -155,6 +167,7 @@ class _HexModel(BaseModel):
     r: int = Field(ge=0, le=_MAX_TILE_INDEX)
     layer: str
     hexType: str
+    settlementType: str | None = None
 
 
 class _CustomHexTypeModel(BaseModel):
@@ -262,7 +275,12 @@ def load_map(path: str | Path) -> GameMap:
                 f"(conflicting key {key!r}) in {file_path}"
             )
         terrain = _resolve_terrain(hex_model.hexType, coord, custom_by_id)
-        tiles[coord] = Tile(coord=coord, terrain=terrain)
+        settlement_kind = _resolve_settlement_kind(
+            terrain,
+            hex_model.settlementType,
+            coord,
+        )
+        tiles[coord] = Tile(coord=coord, terrain=terrain, settlement_kind=settlement_kind)
 
     expected = settings.width * settings.height
     if len(tiles) != expected:
@@ -281,6 +299,31 @@ def load_map(path: str | Path) -> GameMap:
 
 
 # --- Internal helpers -------------------------------------------------------
+
+
+def _resolve_settlement_kind(
+    terrain: Terrain,
+    settlement_type_raw: str | None,
+    coord: OffsetCoord,
+) -> SettlementType | None:
+    """Return settlement subtype for ``SETTLEMENT`` tiles; ``None`` for other terrain."""
+
+    if terrain is not Terrain.SETTLEMENT:
+        if settlement_type_raw is not None:
+            # Tolerate stray editor fields; gameplay ignores them.
+            return None
+        return None
+    if settlement_type_raw is None:
+        return SettlementType.VILLAGE
+    key = settlement_type_raw.strip().casefold()
+    kind = _SETTLEMENT_TYPE_JSON.get(key)
+    if kind is None:
+        allowed = ", ".join(sorted(_SETTLEMENT_TYPE_JSON))
+        raise MapLoadError(
+            f"invalid settlementType {settlement_type_raw!r} at tile ({coord.col}, {coord.row}); "
+            f"allowed: {allowed}"
+        )
+    return kind
 
 
 def _resolve_terrain(

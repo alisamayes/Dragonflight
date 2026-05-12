@@ -19,6 +19,8 @@ from .dragon_defaults import (
     DEFAULT_DRAGON_LEVEL,
     DEFAULT_DRAGON_MAX_HP,
     DEFAULT_DRAGON_SPEED_HEXES_PER_HOUR,
+    DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX,
+    DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING,
     HOURS_PER_DAMAGE_ROUND,
     HOURS_PER_DRAGON_DAY,
 )
@@ -73,7 +75,12 @@ class RaidAttempt:
 
 @dataclass
 class Dragon:
-    """Mutable runtime state for the single player dragon (spec §7)."""
+    """Mutable runtime state for the single player dragon (spec §7).
+
+    :attr:`hp` is **current** hit points; :attr:`max_hp` is the pool ceiling. They start
+    equal; combat reduces ``hp`` only unless a future system raises ``max_hp``.
+    :attr:`current_hp` is a convenience alias for ``hp`` (clamped when set).
+    """
 
     kind: DragonKind
     position: OffsetCoord
@@ -86,7 +93,17 @@ class Dragon:
     speed_hexes_per_hour: float = DEFAULT_DRAGON_SPEED_HEXES_PER_HOUR
     hours_remaining: float = HOURS_PER_DRAGON_DAY
     experience_points: int = 0
+    gold: int = 0
     _activatable_uses_remaining_today: tuple[int, int] = field(default=(1, 1))
+
+    @property
+    def current_hp(self) -> int:
+        """Current hit points; mirrors :attr:`hp`."""
+        return self.hp
+
+    @current_hp.setter
+    def current_hp(self, value: int) -> None:
+        self.hp = max(0, min(int(value), self.max_hp))
 
     @classmethod
     def new_red_fire_at(cls, citadel_coord: OffsetCoord) -> Dragon:
@@ -96,14 +113,28 @@ class Dragon:
         return Redgon.new_at(citadel_coord)
 
     def begin_new_day_at_citadel(self, citadel_coord: OffsetCoord) -> None:
-        """Phase boundary helper: reset daily hours and teleport home (spec §2 phase 5 → 1).
+        """Phase boundary: citadel rest heal, then reset daily hours (spec §2 Citadel → next day).
 
-        Combat-time healing at the citadel (50 % max HP) belongs to the citadel phase;
-        invoke that orchestration when that system exists — not here.
+        Healing uses hours still on the clock **before** the reset: base percent of ``max_hp``
+        plus bonus percent per hour remaining (see :mod:`dragonflight.dragon_defaults`).
         """
+        self._apply_citadel_end_of_day_healing()
         self.position = citadel_coord
         self.hours_remaining = HOURS_PER_DRAGON_DAY
         self._activatable_uses_remaining_today = (1, 1)
+
+    def _citadel_end_of_day_heal_points(self) -> int:
+        """Integer HP restored this dock from ``max_hp`` and :attr:`hours_remaining`."""
+
+        hrs = max(0.0, float(self.hours_remaining))
+        total_percent = float(DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX) + float(
+            DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING
+        ) * hrs
+        return int(round(self.max_hp * total_percent / 100.0))
+
+    def _apply_citadel_end_of_day_healing(self) -> None:
+        gained = self._citadel_end_of_day_heal_points()
+        self.hp = min(self.max_hp, self.hp + gained)
 
     def hex_distance_to(self, target: OffsetCoord) -> int:
         """Straight-line axial distance ignoring terrain — valid for dragon flight (spec §5)."""
@@ -136,6 +167,36 @@ class Dragon:
                 "insufficient hours remaining for flight plus mandatory return trajectory",
             )
         return True, ""
+
+    def validate_damage_round_preserves_return_to_citadel(
+        self,
+        citadel_coord: OffsetCoord,
+    ) -> MoveAttempt:
+        """Return whether one combat round can be committed without trapping the dragon off-home.
+
+        Mirrors the mandatory-return budget used by :meth:`validate_move`: after spending
+        :data:`~dragonflight.dragon_defaults.HOURS_PER_DAMAGE_ROUND`, the dragon must still
+        have enough clock to fly from :attr:`position` back to ``citadel_coord`` at
+        :attr:`speed_hexes_per_hour`.
+        """
+        if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
+            return MoveAttempt(ok=False, reason="not enough daily time for a damage round")
+
+        hours_after_round = self.hours_remaining - HOURS_PER_DAMAGE_ROUND
+        dist_home = distance(
+            offset_to_axial(self.position),
+            offset_to_axial(citadel_coord),
+        )
+        hours_back = self._travel_hours_for_hex_distance(dist_home)
+        if hours_after_round + 1e-9 < hours_back:
+            return MoveAttempt(
+                ok=False,
+                reason=(
+                    "cannot attack: not enough hours left to finish a combat round and "
+                    "return to the citadel before nightfall"
+                ),
+            )
+        return MoveAttempt(ok=True, reason="", hex_distance=dist_home, hours_spent=0.0)
 
     # -- Movement -----------------------------------------------------------------
 

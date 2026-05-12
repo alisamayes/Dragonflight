@@ -34,6 +34,7 @@ import pygame
 
 from .hex_coord import HEX_CORNERS, hex_corner_offset, offset_to_pixel
 from .map_state import GameMap, Tile
+from .settlement import SettlementType
 from .terrain import Terrain
 
 # --- Public colour / sizing policy ------------------------------------------
@@ -52,6 +53,21 @@ TERRAIN_COLORS: dict[Terrain, tuple[int, int, int]] = {
     Terrain.SETTLEMENT: (255, 247, 5),
     Terrain.CITADEL: (227, 22, 22),
 }
+
+#: Distinct fills for authored settlement subtypes (map ``settlementType``).
+SETTLEMENT_KIND_FILL: dict[SettlementType, tuple[int, int, int]] = {
+    SettlementType.VILLAGE: (255, 247, 5),
+    SettlementType.CITY: (255, 196, 72),
+    SettlementType.FORT: (196, 168, 58),
+}
+
+
+def default_tile_fill_rgb(tile: Tile) -> tuple[int, int, int]:
+    """Default hex fill: terrain colour, with settlement subtype tint when set."""
+    if tile.terrain is Terrain.SETTLEMENT and tile.settlement_kind is not None:
+        return SETTLEMENT_KIND_FILL[tile.settlement_kind]
+    return TERRAIN_COLORS[tile.terrain]
+
 
 #: Window background fill — a near-black so any uncovered space (margin) reads
 #: as inert chrome rather than a missing tile.
@@ -311,7 +327,7 @@ def render_map(
             (cx + dx, cy + dy)
             for dx, dy in (hex_corner_offset(hex_size, i) for i in range(HEX_CORNERS))
         ]
-        fill = TERRAIN_COLORS[tile.terrain] if tile_color is None else tile_color(tile)
+        fill = default_tile_fill_rgb(tile) if tile_color is None else tile_color(tile)
         pygame.draw.polygon(surface, fill, polygon)
         pygame.draw.polygon(surface, HEX_OUTLINE_COLOR, polygon, width=HEX_OUTLINE_WIDTH)
 
