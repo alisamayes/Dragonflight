@@ -1,7 +1,8 @@
 """Interactive map session — Pygame (pygame required).
 
 Launched by default from ``python -m dragonflight`` (see ``__main__``): main menu,
-then new-game map and dragon selection, then the movement playtest. Click
+then new-game map and dragon selection, then the movement playtest. Settings →
+Map Loader picks a file then the same dragon chooser before loading. Click
 reachable hexes to move the dragon from the citadel. Invalid tiles (flight range
 or mandatory return to citadel on the daily clock) are drawn muted. A 24-segment
 hour bar tracks remaining daylight.
@@ -109,6 +110,12 @@ _FRAME_RATE: int = 60
 
 
 SETTINGS_BAR_HEIGHT: int = 56
+
+#: Gold added by Settings → Dev Mode (local playtest only).
+DEV_MODE_TEST_GOLD_GRANT: int = 10_000
+
+#: Why the dragon-type screen was opened (controls Back / Play behaviour).
+DragonPickContext = Literal["new_game", "load_map", "same_map_reset"]
 
 #: Legacy design-time default width; new sessions start at font-metric mins instead.
 MAP_SIDE_PANEL_WIDTH: int = 320
@@ -271,6 +278,17 @@ def _project_root() -> Path:
 
 def _assets_dir() -> Path:
     return _project_root() / "assets"
+
+
+def _validate_map_json_path_under_assets(path: Path) -> tuple[bool, str]:
+    """True if ``path`` resolves under ``assets/`` (before attempting to load JSON)."""
+    try:
+        assets_resolved = _assets_dir().resolve()
+        selected_resolved = path.resolve()
+        selected_resolved.relative_to(assets_resolved)
+    except Exception:
+        return False, "Please choose a map file inside assets/."
+    return True, ""
 
 
 def _sanitize_filename(name: str) -> str:
@@ -1404,6 +1422,7 @@ def run_movement_playtest(
         new_game_map_scroll: int = 0
         new_game_status: str = ""
         pending_map_path: Path | None = None
+        dragon_pick_context: DragonPickContext | None = None
         focused_field: str | None = None  # dims | name
         settings_status: str = ""
 
@@ -1509,14 +1528,12 @@ def run_movement_playtest(
 
         def _load_map_from_assets_path(path: Path) -> tuple[bool, str]:
             """Load a map file, refusing paths outside assets/."""
-            try:
-                assets_resolved = _assets_dir().resolve()
-                selected_resolved = path.resolve()
-                selected_resolved.relative_to(assets_resolved)
-            except Exception:
-                return False, "Please choose a map file inside assets/."
+            ok_path, err_path = _validate_map_json_path_under_assets(path)
+            if not ok_path:
+                return False, err_path
 
             try:
+                selected_resolved = path.resolve()
                 new_map = load_map(selected_resolved)
             except MapLoadError as exc:
                 return False, f"Failed to load map: {exc}"
@@ -1558,7 +1575,7 @@ def run_movement_playtest(
         def _begin_play_session_from_pending_map() -> tuple[bool, str]:
             """Load ``pending_map_path`` with ``session_dragon_kind`` and enter ``game``."""
             nonlocal game_map, citadel_coord, dragon, day_index, screen
-            nonlocal settings_status, new_game_status
+            nonlocal settings_status, new_game_status, dragon_pick_context
             nonlocal inspector_focus_coord, inspector_message
             nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
@@ -1601,6 +1618,7 @@ def run_movement_playtest(
             _sync_settlements_from_map()
             _ensure_window_meets_gameplay_floors()
             screen = "game"
+            dragon_pick_context = None
             return True, ""
 
         if game_map is not None:
@@ -1690,7 +1708,9 @@ def run_movement_playtest(
             elif screen == "new_game_dragon":
                 surf.fill(_UI_BG_RGB)
                 title = "Choose your dragon"
-                if pending_map_path is not None:
+                if dragon_pick_context == "same_map_reset":
+                    title = f"{title} — same map, fresh run"
+                elif pending_map_path is not None:
                     title = f"{title} — {pending_map_path.name}"
                 _draw_text(surf, font_big, title, (60, 40), _UI_TEXT_RGB)
                 mx, my = pygame.mouse.get_pos()
@@ -1714,7 +1734,7 @@ def run_movement_playtest(
                     )
 
                 btn_play = pygame.Rect(60, y0 + len(playable_dragon_kinds()) * 46 + 24, 200, 44)
-                can_play = pending_map_path is not None
+                can_play = pending_map_path is not None or dragon_pick_context == "same_map_reset"
                 _draw_button(
                     surf,
                     font_mid,
@@ -1857,6 +1877,8 @@ def run_movement_playtest(
                 btn_creator = pygame.Rect(60, 130, 260, 40)
                 btn_loader = pygame.Rect(60, 182, 260, 40)
                 btn_editor = pygame.Rect(60, 234, 260, 40)
+                btn_new_game = pygame.Rect(60, 286, 260, 40)
+                btn_dev = pygame.Rect(60, 338, 260, 40)
                 btn_back = pygame.Rect(60, win_h - 70, 120, 36)
 
                 _draw_button(
@@ -1880,11 +1902,25 @@ def run_movement_playtest(
                     "Map Editor",
                     hovered=btn_editor.collidepoint(mx, my),
                 )
+                _draw_button(
+                    surf,
+                    font_mid,
+                    btn_new_game,
+                    "New Game",
+                    hovered=btn_new_game.collidepoint(mx, my),
+                )
+                _draw_button(
+                    surf,
+                    font_mid,
+                    btn_dev,
+                    "Dev Mode",
+                    hovered=btn_dev.collidepoint(mx, my),
+                )
                 _draw_text(
                     surf,
                     font,
                     "Load + edit; Save overwrites the file.",
-                    (60, 282),
+                    (60, 386),
                     _UI_MUTED_TEXT_RGB,
                 )
                 _draw_button(
@@ -1892,7 +1928,7 @@ def run_movement_playtest(
                 )
 
                 if settings_status:
-                    _draw_text(surf, font, settings_status, (60, 318), _UI_MUTED_TEXT_RGB)
+                    _draw_text(surf, font, settings_status, (60, 426), _UI_MUTED_TEXT_RGB)
 
             elif screen == "map_creator_setup":
                 surf.fill(_UI_BG_RGB)
@@ -2044,11 +2080,20 @@ def run_movement_playtest(
                         new_game_map_scroll = 0
                         new_game_status = ""
                         pending_map_path = None
+                        dragon_pick_context = None
                         redraw()
                         continue
                     if screen == "new_game_dragon":
-                        screen = "new_game_maps"
-                        new_game_status = ""
+                        ctx = dragon_pick_context or "new_game"
+                        if ctx in ("load_map", "same_map_reset"):
+                            screen = "settings"
+                            pending_map_path = None
+                            dragon_pick_context = None
+                            new_game_status = ""
+                            settings_status = ""
+                        else:
+                            screen = "new_game_maps"
+                            new_game_status = ""
                         redraw()
                         continue
                     if screen == "game" and dragon_upgrade_overlay_active:
@@ -2221,6 +2266,7 @@ def run_movement_playtest(
                             new_game_map_scroll = 0
                             new_game_status = ""
                             pending_map_path = None
+                            dragon_pick_context = None
                             redraw()
                         continue
 
@@ -2231,6 +2277,7 @@ def run_movement_playtest(
                             new_game_map_scroll = 0
                             new_game_status = ""
                             pending_map_path = None
+                            dragon_pick_context = None
                             redraw()
                             continue
                         list_rect = pygame.Rect(40, 120, win_w - 80, win_h - 210)
@@ -2247,6 +2294,7 @@ def run_movement_playtest(
                         if picked_path is not None:
                             pending_map_path = picked_path
                             new_game_status = ""
+                            dragon_pick_context = "new_game"
                             screen = "new_game_dragon"
                             redraw()
                         continue
@@ -2254,8 +2302,16 @@ def run_movement_playtest(
                     if screen == "new_game_dragon":
                         btn_back = pygame.Rect(60, win_h - 70, 120, 36)
                         if btn_back.collidepoint(mx, my):
-                            screen = "new_game_maps"
-                            new_game_status = ""
+                            ctx = dragon_pick_context or "new_game"
+                            if ctx in ("load_map", "same_map_reset"):
+                                screen = "settings"
+                                pending_map_path = None
+                                dragon_pick_context = None
+                                new_game_status = ""
+                                settings_status = ""
+                            else:
+                                screen = "new_game_maps"
+                                new_game_status = ""
                             redraw()
                             continue
                         y0 = 110
@@ -2273,10 +2329,19 @@ def run_movement_playtest(
                         btn_play = pygame.Rect(
                             60, y0 + len(playable_dragon_kinds()) * 46 + 24, 200, 44
                         )
-                        if btn_play.collidepoint(mx, my) and pending_map_path is not None:
-                            ok, err = _begin_play_session_from_pending_map()
-                            if not ok:
-                                new_game_status = err
+                        can_play = pending_map_path is not None or dragon_pick_context == "same_map_reset"
+                        if btn_play.collidepoint(mx, my) and can_play:
+                            if dragon_pick_context == "same_map_reset":
+                                if game_map is not None:
+                                    _reset_session_for_map(game_map)
+                                    dragon_pick_context = None
+                                    new_game_status = ""
+                                else:
+                                    new_game_status = "No map loaded."
+                            else:
+                                ok, err = _begin_play_session_from_pending_map()
+                                if not ok:
+                                    new_game_status = err
                             redraw()
                         continue
 
@@ -2523,6 +2588,8 @@ def run_movement_playtest(
                         btn_creator = pygame.Rect(60, 130, 260, 40)
                         btn_loader = pygame.Rect(60, 182, 260, 40)
                         btn_editor = pygame.Rect(60, 234, 260, 40)
+                        btn_new_game = pygame.Rect(60, 286, 260, 40)
+                        btn_dev = pygame.Rect(60, 338, 260, 40)
                         btn_back = pygame.Rect(60, win_h - 70, 120, 36)
                         if btn_creator.collidepoint(mx, my):
                             screen = "map_creator_setup"
@@ -2537,11 +2604,16 @@ def run_movement_playtest(
                                 settings_status = "No file selected."
                                 redraw()
                                 continue
-                            ok, msg = _load_map_from_assets_path(chosen)
-                            if ok:
+                            ok_path, msg_path = _validate_map_json_path_under_assets(chosen)
+                            if not ok_path:
+                                settings_status = msg_path
                                 redraw()
                                 continue
-                            settings_status = msg
+                            pending_map_path = chosen
+                            dragon_pick_context = "load_map"
+                            new_game_status = ""
+                            settings_status = ""
+                            screen = "new_game_dragon"
                             redraw()
                             continue
                         if btn_editor.collidepoint(mx, my):
@@ -2558,6 +2630,29 @@ def run_movement_playtest(
                                 redraw()
                                 continue
                             settings_status = msg_open
+                            redraw()
+                            continue
+                        if btn_new_game.collidepoint(mx, my):
+                            if game_map is None:
+                                settings_status = "No map in play."
+                                redraw()
+                                continue
+                            pending_map_path = None
+                            dragon_pick_context = "same_map_reset"
+                            new_game_status = ""
+                            settings_status = ""
+                            screen = "new_game_dragon"
+                            redraw()
+                            continue
+                        if btn_dev.collidepoint(mx, my):
+                            if dragon is None:
+                                settings_status = "No dragon in session."
+                                redraw()
+                                continue
+                            dragon.gold += DEV_MODE_TEST_GOLD_GRANT
+                            settings_status = (
+                                f"Dev Mode: +{DEV_MODE_TEST_GOLD_GRANT:,} gold."
+                            )
                             redraw()
                             continue
                         if btn_back.collidepoint(mx, my):
