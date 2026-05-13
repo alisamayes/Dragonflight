@@ -370,18 +370,26 @@ def resolve_settlement_combat_round(
 ) -> DamageRoundExchange | MoveAttempt:
     """Run one 30-minute settlement combat round using the existing Dragon API."""
 
+    from .dragon_abilities import (
+        apply_ice_talons_to_settlement,
+        on_settlement_combat_started,
+        settlement_defence_for_round,
+    )
+
     budget = dragon.validate_damage_round_preserves_return_to_citadel(citadel_coord)
     if not budget.ok:
         return budget
 
+    on_settlement_combat_started(dragon)
     exchange = dragon.attack_settlement(
         settlement_hp=settlement.hp,
         settlement_defence_atk_proxy=settlement.atk,
-        settlement_dfn=settlement.dfn,
+        settlement_dfn=settlement_defence_for_round(dragon, settlement),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):
         settlement.hp = exchange.target_hp_after
+        apply_ice_talons_to_settlement(dragon, settlement)
     return exchange
 
 
@@ -418,6 +426,9 @@ def run_settlement_combat_loop(
             dragon, settlement, world, citadel_coord=citadel_coord
         )
         if isinstance(exchange, MoveAttempt):
+            from .dragon_abilities import on_combat_ended
+
+            on_combat_ended(dragon)
             return SettlementCombatLoopResult(
                 rounds_resolved=rounds,
                 retreated=False,
@@ -430,6 +441,9 @@ def run_settlement_combat_loop(
         exchanges.append(exchange)
 
         if settlement.hp == 0:
+            from .dragon_abilities import on_combat_ended
+
+            on_combat_ended(dragon)
             if on_settlement_defeated is not None:
                 on_settlement_defeated(dragon, settlement)
             if settlements is not None and map_width is not None:
@@ -442,6 +456,9 @@ def run_settlement_combat_loop(
             )
 
         if dragon.hp == 0:
+            from .dragon_abilities import on_combat_ended
+
+            on_combat_ended(dragon)
             return SettlementCombatLoopResult(
                 rounds_resolved=rounds,
                 retreated=False,
@@ -450,6 +467,9 @@ def run_settlement_combat_loop(
             )
 
         if not should_continue():
+            from .dragon_abilities import on_combat_ended
+
+            on_combat_ended(dragon)
             return SettlementCombatLoopResult(
                 rounds_resolved=rounds,
                 retreated=True,

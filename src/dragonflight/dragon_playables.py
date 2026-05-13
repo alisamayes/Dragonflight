@@ -3,7 +3,7 @@
 Each playable dragon is a :class:`~dragonflight.dragon.Dragon` subclass with
 baseline stats and structured ability lines::
 
-    unlock level – Passive|Ability – CD – duration – name
+    unlock level - Passive|Ability - CD - duration - name
 
 Combat behaviour for passives/actives is not simulated here yet; this module
 anchors type identity, tuning numbers, and designer-facing ability metadata.

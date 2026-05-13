@@ -94,7 +94,18 @@ class Dragon:
     hours_remaining: float = HOURS_PER_DRAGON_DAY
     experience_points: int = 0
     gold: int = 0
+    hp_upgrades: int = 0
+    atk_upgrades: int = 0
+    dfn_upgrades: int = 0
+    flight_range_upgrades: int = 0
+    speed_upgrades: int = 0
     _activatable_uses_remaining_today: tuple[int, int] = field(default=(1, 1))
+    unlocked_ability_names: tuple[str, ...] = field(default_factory=tuple)
+    ability_cooldowns: dict[str, int] = field(default_factory=dict)
+    ability_extra_charges_today: dict[str, int] = field(default_factory=dict)
+    active_ability_hours: dict[str, float] = field(default_factory=dict)
+    passive_stacks: dict[str, int] = field(default_factory=dict)
+    marked_ability_tiles: dict[str, tuple[OffsetCoord, ...]] = field(default_factory=dict)
 
     @property
     def current_hp(self) -> int:
@@ -118,18 +129,23 @@ class Dragon:
         Healing uses hours still on the clock **before** the reset: base percent of ``max_hp``
         plus bonus percent per hour remaining (see :mod:`dragonflight.dragon_defaults`).
         """
+        from .dragon_abilities import begin_new_turn, synchronize_unlocked_abilities
+
+        synchronize_unlocked_abilities(self)
         self._apply_citadel_end_of_day_healing()
         self.position = citadel_coord
         self.hours_remaining = HOURS_PER_DRAGON_DAY
         self._activatable_uses_remaining_today = (1, 1)
+        begin_new_turn(self)
 
     def _citadel_end_of_day_heal_points(self) -> int:
         """Integer HP restored this dock from ``max_hp`` and :attr:`hours_remaining`."""
 
         hrs = max(0.0, float(self.hours_remaining))
-        total_percent = float(DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX) + float(
-            DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING
-        ) * hrs
+        total_percent = (
+            float(DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX)
+            + float(DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING) * hrs
+        )
         return int(round(self.max_hp * total_percent / 100.0))
 
     def _apply_citadel_end_of_day_healing(self) -> None:
@@ -144,7 +160,9 @@ class Dragon:
         """Hours spent flying ``hex_distance`` hexes at the dragon's cruising speed."""
         if hex_distance <= 0:
             return 0.0
-        return hex_distance / self.speed_hexes_per_hour
+        from .dragon_abilities import effective_speed_hexes_per_hour
+
+        return hex_distance / effective_speed_hexes_per_hour(self)
 
     def _can_commit_round_trip_budget(
         self,
@@ -219,7 +237,9 @@ class Dragon:
         if dist == 0:
             return MoveAttempt(ok=False, reason="already at destination")
 
-        if dist > self.flight_range_hexes:
+        from .dragon_abilities import effective_flight_range
+
+        if dist > effective_flight_range(self):
             return MoveAttempt(ok=False, reason="destination exceeds flight range")
 
         distance_home_from_dest = distance(
@@ -255,6 +275,9 @@ class Dragon:
         hours = self._travel_hours_for_hex_distance(dist)
         self.position = destination
         self.hours_remaining -= hours
+        from .dragon_abilities import apply_time_spent
+
+        apply_time_spent(self, hours)
         return MoveAttempt(ok=True, reason="", hex_distance=dist, hours_spent=hours)
 
     # -- Combat scaffolding -------------------------------------------------------
@@ -273,13 +296,33 @@ class Dragon:
         if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
             return MoveAttempt(ok=False, reason="not enough daily time for a damage round")
 
-        dragon_to_target = damage_dragon_attacks(self.atk, target_dfn)
-        target_to_dragon = damage_human_or_army_attacks(target_atk, self.dfn)
+        from .dragon_abilities import (
+            apply_time_spent,
+            effective_attack,
+            effective_defence,
+            enemy_can_retaliate,
+            mitigated_damage_taken,
+            thorns_damage,
+            vivify_attack_bonus,
+        )
+
+        dragon_to_target = damage_dragon_attacks(
+            effective_attack(self) + vivify_attack_bonus(self),
+            target_dfn,
+        )
+        raw_target_to_dragon = (
+            damage_human_or_army_attacks(target_atk, effective_defence(self))
+            if enemy_can_retaliate(self)
+            else 0
+        )
+        target_to_dragon = mitigated_damage_taken(self, raw_target_to_dragon)
+        dragon_to_target += thorns_damage(self, raw_target_to_dragon)
 
         next_target_hp = max(0, target_hp - dragon_to_target)
         next_dragon_hp = max(0, self.hp - target_to_dragon)
 
         self.hours_remaining -= HOURS_PER_DAMAGE_ROUND
+        apply_time_spent(self, HOURS_PER_DAMAGE_ROUND)
         self.hp = next_dragon_hp
 
         return DamageRoundExchange(
@@ -322,11 +365,46 @@ class Dragon:
 
         ``settlement_defence_atk_proxy`` stands in until settlement objects expose combat stats.
         """
-        del world
-        return self.attack_round_vs_target(
-            target_hp=settlement_hp,
-            target_atk=settlement_defence_atk_proxy,
-            target_dfn=settlement_dfn,
+        from .dragon_abilities import (
+            effective_attack,
+            outgoing_settlement_damage_multiplier,
+            vivify_attack_bonus,
+        )
+
+        base_attack = effective_attack(self, world=world) + vivify_attack_bonus(self)
+        boosted_attack = max(
+            1, int(round(base_attack * outgoing_settlement_damage_multiplier(self)))
+        )
+        if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
+            return MoveAttempt(ok=False, reason="not enough daily time for a damage round")
+        dragon_to_target = damage_dragon_attacks(boosted_attack, settlement_dfn)
+        from .dragon_abilities import (
+            apply_time_spent,
+            effective_defence,
+            enemy_can_retaliate,
+            mitigated_damage_taken,
+            thorns_damage,
+        )
+
+        raw_target_to_dragon = (
+            damage_human_or_army_attacks(settlement_defence_atk_proxy, effective_defence(self))
+            if enemy_can_retaliate(self)
+            else 0
+        )
+        target_to_dragon = mitigated_damage_taken(self, raw_target_to_dragon)
+        next_target_hp = max(
+            0, settlement_hp - dragon_to_target - thorns_damage(self, raw_target_to_dragon)
+        )
+        next_dragon_hp = max(0, self.hp - target_to_dragon)
+        self.hours_remaining -= HOURS_PER_DAMAGE_ROUND
+        apply_time_spent(self, HOURS_PER_DAMAGE_ROUND)
+        self.hp = next_dragon_hp
+        return DamageRoundExchange(
+            dragon_hp_after=self.hp,
+            target_hp_after=next_target_hp,
+            damage_to_target=settlement_hp - next_target_hp,
+            damage_to_dragon=target_to_dragon,
+            hours_spent=HOURS_PER_DAMAGE_ROUND,
         )
 
     # -- Raiding / economy placeholders -------------------------------------------
@@ -367,7 +445,7 @@ class Dragon:
         self.hours_remaining -= hours_travel
         self.position = settlement_coord
 
-        # Combat rounds, aggression spillover, loot scaling, eco/power hits — spec §§6–8, §11 — TBD.
+        # Combat rounds, aggression spillover, loot scaling, eco/power hits — spec §§6-8, §11 — TBD.
         return RaidAttempt(
             ok=True,
             reason="travel only; raid combat + payouts not simulated yet",
@@ -380,19 +458,42 @@ class Dragon:
     def level_up(self) -> None:
         """Advance level counters; skill unlock cadence (5/10/15) remains TODO (spec §7)."""
         self.level += 1
-        # Future: grant talent points, refresh passive/activatable loadouts per species.
+        from .dragon_abilities import synchronize_unlocked_abilities
+
+        synchronize_unlocked_abilities(self)
 
     def grant_experience(self, amount: int) -> None:
         """Accumulate XP without automatic levelling until progression rules exist."""
         self.experience_points += max(0, amount)
 
     def spend_gold_stat_upgrade(self, stat_name: str, gold_cost: int) -> bool:
-        """Placeholder shop hook for citadel spending (spec §7 Progression).
+        """Buy one stat tier at the current level (no draft sequencing across stats).
 
-        Returns ``False`` until economy state is injected by the citadel system.
+        ``gold_cost`` must match the computed price for the next tier of ``stat_name``.
         """
-        del stat_name, gold_cost
-        return False
+        from .dragon_progression import (
+            apply_one_dragon_stat_upgrade,
+            dragon_stat_upgrade_gold_cost,
+            dragon_stat_upgrade_lifetime_count,
+            dragon_upgrade_baseline_from_dragon,
+            parse_dragon_upgrade_stat_name,
+        )
+
+        stat = parse_dragon_upgrade_stat_name(stat_name)
+        if stat is None:
+            return False
+        baseline = dragon_upgrade_baseline_from_dragon(self)
+        n = dragon_stat_upgrade_lifetime_count(baseline, stat) + 1
+        expected = dragon_stat_upgrade_gold_cost(int(self.level), n)
+        if gold_cost != expected or self.gold < expected:
+            return False
+        self.gold -= expected
+        apply_one_dragon_stat_upgrade(self, stat)
+        self.level += 1
+        from .dragon_abilities import synchronize_unlocked_abilities
+
+        synchronize_unlocked_abilities(self)
+        return True
 
     def repair_at_citadel_stub(self, gold_paid: int) -> bool:
         """Placeholder for paid repairs / healing bundles at the citadel (spec §2)."""
@@ -408,8 +509,11 @@ class Dragon:
         return MoveAttempt(ok=False, reason="retreat flow not simulated yet")
 
     def use_passive_bonus_stub(self) -> int:
-        """Reserved hook for racial passives once ability data exists (spec §7)."""
-        return 0
+        """Compatibility wrapper returning count of currently unlocked passives."""
+
+        from .dragon_abilities import unlocked_ability_specs
+
+        return sum(1 for spec in unlocked_ability_specs(self) if spec.category == "passive")
 
     def consume_activatable_charge_stub(self, slot: int) -> bool:
         """Placeholder for daily-limited dragon actives (spec §7).

@@ -16,7 +16,7 @@ Coordinate convention (round Wave-2-revision-1 amendment):
   these values; no axial conversion happens during load. Pathfinding and
   distance code that needs axial calls ``hex_coord.offset_to_axial`` itself.
 
-Resolution rules (spec §5; ``Documentation/map-schema.md`` §5–§7):
+Resolution rules (spec §5; ``Documentation/map-schema.md`` §5-§7):
 
 1. ``hexType`` matching a recognised built-in (``grassland``, ``forest``,
    ``mountain``) maps directly to a ``Terrain`` value.
@@ -334,7 +334,7 @@ def _resolve_terrain(
     """Resolve a tile's ``hexType`` string to a ``Terrain`` value.
 
     Implements the rule documented in this module's docstring (spec §5;
-    ``map-schema.md`` §5–§7). Errors include the offending coordinate so
+    ``map-schema.md`` §5-§7). Errors include the offending coordinate so
     map authors can find the bad tile fast.
     """
     if hex_type in _BUILT_IN_TERRAIN:

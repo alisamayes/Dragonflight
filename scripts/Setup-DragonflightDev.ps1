@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  One-time setup: create .venv with Python 3.11–3.13 and install Dragonflight + dev deps.
+  One-time setup: create .venv with Python 3.11-3.13 and install Dragonflight + dev deps.
 
 .NOTES
   Run from anywhere:

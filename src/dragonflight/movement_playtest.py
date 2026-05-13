@@ -23,12 +23,36 @@ from typing import Literal
 import pygame
 
 from .dragon import Dragon, DragonKind, MoveAttempt
+from .dragon_abilities import (
+    ability_button_enabled,
+    ability_requires_target,
+    ability_status_label,
+    ability_ui_detail_lines,
+    effective_attack,
+    effective_defence,
+    effective_flight_range,
+    effective_speed_hexes_per_hour,
+    on_combat_ended,
+    try_use_ability,
+    unlocked_ability_specs,
+)
 from .dragon_defaults import HOURS_PER_DRAGON_DAY
 from .dragon_playables import (
     default_playable_kind,
     display_name_for_kind,
     new_playable_dragon,
     playable_dragon_kinds,
+)
+from .dragon_progression import (
+    DRAGON_UPGRADE_STAT_COLUMN_ORDER,
+    DragonUpgradeBaseline,
+    DragonUpgradeStat,
+    apply_dragon_upgrade_draft,
+    dragon_stat_pill_strings_from_totals,
+    dragon_upgrade_baseline_from_dragon,
+    marginal_dragon_stat_upgrade_cost,
+    preview_dragon_stats_after_draft,
+    total_dragon_upgrade_draft_cost,
 )
 from .hex_coord import HEX_CORNERS, OffsetCoord, offset_to_pixel
 from .hour_bar_layout import hour_bar_segment_layout
@@ -305,6 +329,23 @@ def _draw_button(
     tx = rect.x + (rect.w - text_surf.get_width()) // 2
     ty = rect.y + (rect.h - text_surf.get_height()) // 2
     surface.blit(text_surf, (tx, ty))
+
+
+def _wrap_text_to_width(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = word if not current else f"{current} {word}"
+        if font.size(trial)[0] <= max_width:
+            current = trial
+            continue
+        if current:
+            lines.append(current)
+        current = word
+    if current:
+        lines.append(current)
+    return lines
 
 
 def _draw_text_field(
@@ -633,8 +674,9 @@ def _draw_dragon_panel(
     *,
     panel_rect: pygame.Rect,
     dragon: Dragon,
-) -> None:
-    """Left column: dragon identity, level, combat/move stats, ability placeholders."""
+    world: GameMap,
+) -> dict[str, pygame.Rect]:
+    """Left column: dragon identity, level, combat/move stats, and unlocked abilities."""
 
     pygame.draw.rect(surface, _UI_PANEL_RGB, panel_rect)
     pygame.draw.rect(surface, _UI_BORDER_RGB, panel_rect, width=1)
@@ -659,24 +701,107 @@ def _draw_dragon_panel(
     _draw_text(surface, font_small, f"Gold: {dragon.gold}", (x, y), _UI_MUTED_TEXT_RGB)
     y += line_gap + 6
 
-    _draw_text(surface, font_small, "Stats", (x, y), _UI_TEXT_RGB)
+    _draw_text(surface, font_small, "Base Stats", (x, y), _UI_TEXT_RGB)
     y += line_gap
-    stats = (
-        f"HP: {dragon.hp} / {dragon.max_hp}",
+    vivify_bonus = int(dragon.passive_stacks.get("Vivify max hp bonus", 0))
+    base_max_hp = max(1, dragon.max_hp - vivify_bonus)
+    base_stats = (
+        f"HP: {dragon.hp} / {base_max_hp}",
         f"ATK: {dragon.atk}  |  DFN: {dragon.dfn}",
         f"Flight range: {dragon.flight_range_hexes} hexes",
         f"Speed: {dragon.speed_hexes_per_hour:g} hex/h",
     )
-    for line in stats:
+    for line in base_stats:
         _draw_text(surface, font_small, line, (x, y), _UI_MUTED_TEXT_RGB)
         y += line_gap
 
     y += 6
+    _draw_text(surface, font_small, "Combat Stats", (x, y), _UI_TEXT_RGB)
+    y += line_gap
+    combat_atk = effective_attack(dragon, world=world)
+    combat_dfn = effective_defence(dragon)
+    combat_range = effective_flight_range(dragon)
+    combat_speed = effective_speed_hexes_per_hour(dragon, world=world)
+    boosted_rgb = (170, 230, 170)
+    _draw_text(
+        surface,
+        font_small,
+        f"HP: {dragon.hp} / {dragon.max_hp}",
+        (x, y),
+        boosted_rgb if dragon.max_hp > base_max_hp else _UI_MUTED_TEXT_RGB,
+    )
+    y += line_gap
+    _draw_text(
+        surface,
+        font_small,
+        f"ATK: {combat_atk}  |  DFN: {combat_dfn}",
+        (x, y),
+        boosted_rgb if combat_atk > dragon.atk or combat_dfn > dragon.dfn else _UI_MUTED_TEXT_RGB,
+    )
+    y += line_gap
+    _draw_text(
+        surface,
+        font_small,
+        f"Flight range: {combat_range} hexes",
+        (x, y),
+        boosted_rgb if combat_range > dragon.flight_range_hexes else _UI_MUTED_TEXT_RGB,
+    )
+    y += line_gap
+    _draw_text(
+        surface,
+        font_small,
+        f"Speed: {combat_speed:g} hex/h",
+        (x, y),
+        boosted_rgb if combat_speed > dragon.speed_hexes_per_hour else _UI_MUTED_TEXT_RGB,
+    )
+    y += line_gap
+
+    y += 6
     _draw_text(surface, font_small, "Abilities", (x, y), _UI_TEXT_RGB)
     y += line_gap
-    _draw_text(surface, font_small, "Ability 1: —", (x, y), _UI_MUTED_TEXT_RGB)
-    y += line_gap
-    _draw_text(surface, font_small, "Ability 2: —", (x, y), _UI_MUTED_TEXT_RGB)
+    ability_buttons: dict[str, pygame.Rect] = {}
+    max_text_w = panel_rect.w - 2 * pad
+    mx, my = pygame.mouse.get_pos()
+    specs = unlocked_ability_specs(dragon)
+    if not specs:
+        _draw_text(surface, font_small, "No abilities unlocked yet.", (x, y), _UI_MUTED_TEXT_RGB)
+        return ability_buttons
+
+    for spec in specs:
+        if y > panel_rect.bottom - 32:
+            _draw_text(surface, font_small, "…", (x, y), _UI_MUTED_TEXT_RGB)
+            break
+        label = f"{spec.name} ({'Passive' if spec.category == 'passive' else 'Ability'})"
+        _draw_text(surface, font_small, label, (x, y), _UI_TEXT_RGB)
+        y += 18
+        for detail in ability_ui_detail_lines(dragon, spec, world=world):
+            for line in _wrap_text_to_width(font_small, detail, max_text_w):
+                if y > panel_rect.bottom - 18:
+                    break
+                _draw_text(surface, font_small, line, (x, y), _UI_MUTED_TEXT_RGB)
+                y += 17
+            if y > panel_rect.bottom - 18:
+                break
+        if spec.category == "passive":
+            _draw_text(surface, font_small, "Active", (x, y), (170, 220, 170))
+            y += 24
+            continue
+        status = ability_status_label(dragon, spec.name)
+        _draw_text(surface, font_small, status, (x, y), _UI_MUTED_TEXT_RGB)
+        y += 18
+        btn = pygame.Rect(x, y, max(80, max_text_w), 28)
+        enabled = ability_button_enabled(dragon, spec.name)
+        _draw_button(
+            surface,
+            font_small,
+            btn,
+            "Target" if ability_requires_target(spec.name) else "Use",
+            hovered=enabled and btn.collidepoint(mx, my),
+            active=enabled,
+        )
+        ability_buttons[spec.name] = btn
+        y += 36
+    return ability_buttons
 
 
 def _draw_raid_combat_overlay(
@@ -745,6 +870,279 @@ def _draw_raid_combat_overlay(
     _draw_button(surface, font, attack_rect, "Attack", hovered=attack_rect.collidepoint(mx, my))
     _draw_button(surface, font, retreat_rect, "Retreat", hovered=retreat_rect.collidepoint(mx, my))
     return attack_rect, retreat_rect
+
+
+@dataclass(slots=True)
+class DragonUpgradeOverlayLayout:
+    """Pixel geometry for :func:`_draw_dragon_upgrade_overlay`."""
+
+    panel: pygame.Rect
+    columns: tuple[tuple[pygame.Rect, pygame.Rect, pygame.Rect], ...]
+    reset_btn: pygame.Rect
+    next_day_btn: pygame.Rect
+    title_pos: tuple[int, int]
+    baseline_pos: tuple[int, int]
+    current_label_pos: tuple[int, int]
+    preview_label_pos: tuple[int, int]
+    preview_line_pos: tuple[int, int]
+
+
+@dataclass(slots=True)
+class DragonUpgradeOverlayClickRects:
+    cost: dict[DragonUpgradeStat, pygame.Rect]
+    reset: pygame.Rect
+    next_day: pygame.Rect
+
+
+_DRAGON_UPGRADE_STAT_LABELS: dict[DragonUpgradeStat, str] = {
+    DragonUpgradeStat.HP: "Health",
+    DragonUpgradeStat.ATK: "Attack",
+    DragonUpgradeStat.DFN: "Defence",
+    DragonUpgradeStat.FLIGHT_RANGE: "Range",
+    DragonUpgradeStat.SPEED: "Speed",
+}
+
+
+def dragon_upgrade_overlay_layout(client_w: int, client_h: int) -> DragonUpgradeOverlayLayout:
+    """Compute centered panel and five stat columns (current pill, preview pill, cost button)."""
+
+    row_pill_h = 40
+    row_btn_h = 36
+    col_gap = 8
+    panel_pad = 22
+    panel_w_cap = 700
+
+    title_h = 34
+    baseline_h = 22
+    lbl_h = 18
+    # Vertical order: current row, cost row, preview row (see layout body).
+    pill_cost_preview_block = lbl_h + row_pill_h + 6 + row_btn_h + 14 + lbl_h + row_pill_h + 14
+    preview_h = 24
+    btn_row = 40
+    gap = 8
+    total_inner = title_h + baseline_h + pill_cost_preview_block + preview_h + btn_row + gap * 4
+    panel_h = panel_pad * 2 + total_inner
+    panel_w = min(panel_w_cap, client_w - 32)
+    panel_x = max(8, (client_w - panel_w) // 2)
+    panel_y = max(12, (client_h - panel_h) // 2)
+    panel = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+
+    inner_left = panel.x + panel_pad
+    inner_w = panel_w - 2 * panel_pad
+    col_w = max(52, (inner_w - 4 * col_gap) // 5)
+
+    y = panel.y + panel_pad
+    title_pos = (inner_left, y)
+    y += title_h + gap
+    baseline_pos = (inner_left, y)
+    y += baseline_h + 10
+    current_label_pos = (inner_left, y)
+    y += lbl_h
+    cur_pill_y = y
+    y += row_pill_h + 6
+    cost_y = y
+    y += row_btn_h + 14
+    preview_label_pos = (inner_left, y)
+    y += lbl_h
+    prv_pill_y = y
+    y += row_pill_h + 14
+    preview_line_pos = (inner_left, y)
+    y += preview_h + 12
+    btns_y = y
+
+    columns: list[tuple[pygame.Rect, pygame.Rect, pygame.Rect]] = []
+    for i in range(5):
+        x = inner_left + i * (col_w + col_gap)
+        columns.append(
+            (
+                pygame.Rect(x, cur_pill_y, col_w, row_pill_h),
+                pygame.Rect(x, prv_pill_y, col_w, row_pill_h),
+                pygame.Rect(x, cost_y, col_w, row_btn_h),
+            )
+        )
+
+    reset_w = 120
+    next_w = 150
+    gap_btn = 14
+    btns_total = reset_w + gap_btn + next_w
+    btns_x0 = panel.x + (panel_w - btns_total) // 2
+    reset_btn = pygame.Rect(btns_x0, btns_y, reset_w, row_btn_h)
+    next_day_btn = pygame.Rect(btns_x0 + reset_w + gap_btn, btns_y, next_w, row_btn_h)
+
+    return DragonUpgradeOverlayLayout(
+        panel=panel,
+        columns=tuple(columns),
+        reset_btn=reset_btn,
+        next_day_btn=next_day_btn,
+        title_pos=title_pos,
+        baseline_pos=baseline_pos,
+        current_label_pos=current_label_pos,
+        preview_label_pos=preview_label_pos,
+        preview_line_pos=preview_line_pos,
+    )
+
+
+def _draw_dragon_upgrade_stat_pill(
+    surface: pygame.Surface,
+    font: pygame.font.Font,
+    rect: pygame.Rect,
+    *,
+    title: str,
+    value: str,
+) -> None:
+    pygame.draw.rect(surface, _UI_BUTTON_RGB, rect, border_radius=6)
+    pygame.draw.rect(surface, _UI_BORDER_RGB, rect, width=1, border_radius=6)
+    title_surf = font.render(title, True, _UI_MUTED_TEXT_RGB)
+    value_surf = font.render(value, True, _UI_TEXT_RGB)
+    line_gap = 2
+    stack_h = title_surf.get_height() + line_gap + value_surf.get_height()
+    y0 = rect.y + (rect.h - stack_h) // 2
+    surface.blit(
+        title_surf,
+        (rect.x + (rect.w - title_surf.get_width()) // 2, y0),
+    )
+    surface.blit(
+        value_surf,
+        (
+            rect.x + (rect.w - value_surf.get_width()) // 2,
+            y0 + title_surf.get_height() + line_gap,
+        ),
+    )
+
+
+def _draw_dragon_upgrade_cost_tile(
+    surface: pygame.Surface,
+    font: pygame.font.Font,
+    rect: pygame.Rect,
+    label: str,
+    *,
+    enabled: bool,
+) -> None:
+    mx, my = pygame.mouse.get_pos()
+    hovered = enabled and rect.collidepoint(mx, my)
+    if enabled:
+        _draw_button(surface, font, rect, label, hovered=hovered)
+    else:
+        pygame.draw.rect(surface, _UI_INPUT_RGB, rect, border_radius=6)
+        pygame.draw.rect(surface, _UI_BORDER_RGB, rect, width=1, border_radius=6)
+        surf = font.render(label, True, _UI_MUTED_TEXT_RGB)
+        surface.blit(
+            surf,
+            (rect.x + (rect.w - surf.get_width()) // 2, rect.y + (rect.h - surf.get_height()) // 2),
+        )
+
+
+def _draw_dragon_upgrade_overlay(
+    surface: pygame.Surface,
+    *,
+    client_w: int,
+    client_h: int,
+    font_mid: pygame.font.Font,
+    font_small: pygame.font.Font,
+    font_small_bold: pygame.font.Font,
+    baseline: DragonUpgradeBaseline,
+    draft: list[DragonUpgradeStat],
+) -> DragonUpgradeOverlayClickRects:
+    """Full-window modal for end-of-day dragon stat purchases; returns click targets."""
+
+    dim = pygame.Surface((client_w, client_h), pygame.SRCALPHA)
+    dim.fill((12, 14, 20, 230))
+    surface.blit(dim, (0, 0))
+
+    layout = dragon_upgrade_overlay_layout(client_w, client_h)
+    pygame.draw.rect(surface, _UI_PANEL_RGB, layout.panel)
+    pygame.draw.rect(surface, _UI_BORDER_RGB, layout.panel, width=1)
+
+    _draw_text(surface, font_mid, "Draconic Upgrades", layout.title_pos, _UI_TEXT_RGB)
+
+    base_gold_line = f"Gold: {baseline.gold}    Level: {baseline.level}"
+    base_surf = font_small_bold.render(base_gold_line, True, _UI_TEXT_RGB)
+    surface.blit(base_surf, layout.baseline_pos)
+
+    _draw_text(surface, font_small, "Current stats", layout.current_label_pos, _UI_MUTED_TEXT_RGB)
+    cur_hp, cur_max, cur_a, cur_d, cur_fr, cur_spd = (
+        baseline.hp,
+        baseline.max_hp,
+        baseline.atk,
+        baseline.dfn,
+        baseline.flight_range_hexes,
+        baseline.speed_hexes_per_hour,
+    )
+    cur_pills = dragon_stat_pill_strings_from_totals(cur_hp, cur_max, cur_a, cur_d, cur_fr, cur_spd)
+    prv_hp, prv_max, prv_a, prv_d, prv_fr, prv_spd = preview_dragon_stats_after_draft(
+        baseline, draft
+    )
+    prv_pills = dragon_stat_pill_strings_from_totals(prv_hp, prv_max, prv_a, prv_d, prv_fr, prv_spd)
+
+    total_cost = total_dragon_upgrade_draft_cost(baseline, draft)
+    preview_gold = baseline.gold - total_cost
+    preview_level = baseline.level + len(draft)
+    preview_line = (
+        f"Gold: {baseline.gold} \u2212 {total_cost} \u2192 {preview_gold}    Level: {preview_level}"
+    )
+    prv_surf = font_small_bold.render(preview_line, True, _UI_TEXT_RGB)
+
+    cost_rects: dict[DragonUpgradeStat, pygame.Rect] = {}
+    for i, stat in enumerate(DRAGON_UPGRADE_STAT_COLUMN_ORDER):
+        r_cur, r_prv, r_cost = layout.columns[i]
+        stat_title = _DRAGON_UPGRADE_STAT_LABELS[stat]
+        _draw_dragon_upgrade_stat_pill(
+            surface, font_small, r_cur, title=stat_title, value=cur_pills[i]
+        )
+        marginal = marginal_dragon_stat_upgrade_cost(baseline, draft, stat)
+        draft_if = list(draft) + [stat]
+        next_total = total_dragon_upgrade_draft_cost(baseline, draft_if)
+        can_add = next_total <= baseline.gold
+        _draw_dragon_upgrade_cost_tile(
+            surface,
+            font_small,
+            r_cost,
+            f"{marginal} g",
+            enabled=can_add,
+        )
+        cost_rects[stat] = r_cost
+
+    _draw_text(surface, font_small, "Preview stats", layout.preview_label_pos, _UI_MUTED_TEXT_RGB)
+    for i, stat in enumerate(DRAGON_UPGRADE_STAT_COLUMN_ORDER):
+        _, r_prv, _ = layout.columns[i]
+        stat_title = _DRAGON_UPGRADE_STAT_LABELS[stat]
+        _draw_dragon_upgrade_stat_pill(
+            surface, font_small, r_prv, title=stat_title, value=prv_pills[i]
+        )
+
+    surface.blit(prv_surf, layout.preview_line_pos)
+
+    mx, my = pygame.mouse.get_pos()
+    can_next_day = preview_gold >= 0
+    _draw_button(
+        surface,
+        font_small,
+        layout.reset_btn,
+        "Reset",
+        hovered=layout.reset_btn.collidepoint(mx, my),
+    )
+    if can_next_day:
+        _draw_button(
+            surface,
+            font_small,
+            layout.next_day_btn,
+            "Next day",
+            hovered=layout.next_day_btn.collidepoint(mx, my),
+        )
+    else:
+        _draw_dragon_upgrade_cost_tile(
+            surface,
+            font_small,
+            layout.next_day_btn,
+            "Next day",
+            enabled=False,
+        )
+
+    return DragonUpgradeOverlayClickRects(
+        cost=cost_rects,
+        reset=layout.reset_btn,
+        next_day=layout.next_day_btn,
+    )
 
 
 def _draw_tile_inspector_panel(
@@ -928,6 +1326,7 @@ def run_movement_playtest(
         font_big = pygame.font.SysFont(None, 34)
         font_mid = pygame.font.SysFont(None, 24)
         font_small = pygame.font.SysFont(None, 18)
+        font_small_bold = pygame.font.SysFont(None, 18, bold=True)
 
         min_dragon_panel_w = _min_dragon_panel_column_width(font, font_small)
         min_inspector_panel_w = _min_inspector_panel_column_width(font, font_small)
@@ -1018,12 +1417,18 @@ def run_movement_playtest(
         inspector_focus_coord: OffsetCoord | None = None
         inspector_message: str = ""
         inspector_raid_button_rect: pygame.Rect | None = None
+        dragon_ability_button_rects: dict[str, pygame.Rect] = {}
+        targeting_ability_name: str | None = None
         raid_combat_settlement: Settlement | None = None
         raid_overlay_banner: str = ""
         raid_overlay_auto_close_deadline_ms: int | None = None
         raid_overlay_attack_rect: pygame.Rect | None = None
         raid_overlay_retreat_rect: pygame.Rect | None = None
         splitter_drag: Literal["left", "right"] | None = None
+        dragon_upgrade_overlay_active = False
+        dragon_upgrade_draft: list[DragonUpgradeStat] = []
+        dragon_upgrade_overlay_baseline: DragonUpgradeBaseline | None = None
+        dragon_upgrade_overlay_click: DragonUpgradeOverlayClickRects | None = None
 
         def _sync_settlements_from_map() -> None:
             nonlocal settlements_by_coord
@@ -1125,8 +1530,11 @@ def run_movement_playtest(
         def _reset_session_for_map(new_map: GameMap) -> None:
             nonlocal game_map, citadel_coord, dragon, day_index, screen, settings_status
             nonlocal inspector_focus_coord, inspector_message
+            nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
             nonlocal raid_overlay_auto_close_deadline_ms
+            nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
+            nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
             game_map = new_map
             citadel_coord = _find_citadel_coord(game_map)
             dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
@@ -1134,9 +1542,15 @@ def run_movement_playtest(
             settings_status = ""
             inspector_focus_coord = None
             inspector_message = ""
+            dragon_ability_button_rects = {}
+            targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
             raid_overlay_auto_close_deadline_ms = None
+            dragon_upgrade_overlay_active = False
+            dragon_upgrade_draft = []
+            dragon_upgrade_overlay_baseline = None
+            dragon_upgrade_overlay_click = None
             _sync_settlements_from_map()
             _ensure_window_meets_gameplay_floors()
             screen = "game"
@@ -1146,8 +1560,11 @@ def run_movement_playtest(
             nonlocal game_map, citadel_coord, dragon, day_index, screen
             nonlocal settings_status, new_game_status
             nonlocal inspector_focus_coord, inspector_message
+            nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
             nonlocal raid_overlay_auto_close_deadline_ms
+            nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
+            nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
             if pending_map_path is None:
                 return False, "No map selected."
             try:
@@ -1172,9 +1589,15 @@ def run_movement_playtest(
             new_game_status = ""
             inspector_focus_coord = None
             inspector_message = ""
+            dragon_ability_button_rects = {}
+            targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
             raid_overlay_auto_close_deadline_ms = None
+            dragon_upgrade_overlay_active = False
+            dragon_upgrade_draft = []
+            dragon_upgrade_overlay_baseline = None
+            dragon_upgrade_overlay_click = None
             _sync_settlements_from_map()
             _ensure_window_meets_gameplay_floors()
             screen = "game"
@@ -1185,7 +1608,9 @@ def run_movement_playtest(
 
         def redraw() -> None:
             nonlocal inspector_raid_button_rect
+            nonlocal dragon_ability_button_rects
             nonlocal raid_overlay_attack_rect, raid_overlay_retreat_rect
+            nonlocal dragon_upgrade_overlay_click
             surf = pygame.display.get_surface()
             surf.fill(BACKGROUND_COLOR)
 
@@ -1317,7 +1742,7 @@ def run_movement_playtest(
                         f"Day {day_index}  |  Gold {dragon.gold}  |  "
                         f"{display_name_for_kind(dragon.kind)}  |  "
                         "Green bar = hours left  |  Muted = unreachable  |  "
-                        "Right-click: inspect  |  Citadel = new day"
+                        "Right-click: inspect  |  Citadel: upgrades then next day"
                     ),
                     True,
                     (210, 210, 220),
@@ -1351,12 +1776,13 @@ def run_movement_playtest(
                 surf.set_clip(clip_prev)
 
                 dragon_panel_rect = pygame.Rect(0, TIME_BAR_HEIGHT, dragon_panel_w, map_area_h)
-                _draw_dragon_panel(
+                dragon_ability_button_rects = _draw_dragon_panel(
                     surf,
                     font,
                     font_small,
                     panel_rect=dragon_panel_rect,
                     dragon=dragon,
+                    world=game_map,
                 )
 
                 panel_rect = pygame.Rect(
@@ -1392,12 +1818,36 @@ def run_movement_playtest(
                     raid_overlay_attack_rect = None
                     raid_overlay_retreat_rect = None
 
+                if targeting_ability_name is not None:
+                    mx_t, my_t = pygame.mouse.get_pos()
+                    pygame.draw.circle(surf, (90, 210, 255), (mx_t, my_t), 7, width=2)
+                    _draw_text(
+                        surf,
+                        font_small,
+                        f"Targeting {targeting_ability_name}: left-click map, right-click/Esc cancel",
+                        (dragon_panel_w + 12, TIME_BAR_HEIGHT + 10),
+                        (160, 230, 255),
+                    )
+
                 bar_rect = pygame.Rect(0, win_h - SETTINGS_BAR_HEIGHT, win_w, SETTINGS_BAR_HEIGHT)
                 pygame.draw.rect(surf, _UI_BG_RGB, bar_rect)
                 pygame.draw.rect(surf, _UI_BORDER_RGB, bar_rect, width=1)
                 btn = pygame.Rect(win_w - 140, win_h - SETTINGS_BAR_HEIGHT + 10, 120, 36)
                 hovered = btn.collidepoint(pygame.mouse.get_pos())
                 _draw_button(surf, font_mid, btn, "Settings", hovered=hovered)
+
+                dragon_upgrade_overlay_click = None
+                if dragon_upgrade_overlay_active and dragon_upgrade_overlay_baseline is not None:
+                    dragon_upgrade_overlay_click = _draw_dragon_upgrade_overlay(
+                        surf,
+                        client_w=win_w,
+                        client_h=win_h,
+                        font_mid=font_mid,
+                        font_small=font_small,
+                        font_small_bold=font_small_bold,
+                        baseline=dragon_upgrade_overlay_baseline,
+                        draft=dragon_upgrade_draft,
+                    )
 
             elif screen == "settings":
                 surf.fill(_UI_BG_RGB)
@@ -1601,6 +2051,14 @@ def run_movement_playtest(
                         new_game_status = ""
                         redraw()
                         continue
+                    if screen == "game" and dragon_upgrade_overlay_active:
+                        redraw()
+                        continue
+                    if screen == "game" and targeting_ability_name is not None:
+                        targeting_ability_name = None
+                        inspector_message = "Ability targeting cancelled."
+                        redraw()
+                        continue
                     if screen == "game":
                         running = False
                         break
@@ -1717,7 +2175,12 @@ def run_movement_playtest(
                         and dragon is not None
                         and citadel_coord is not None
                     )
-                    if in_play_session_rc:
+                    if in_play_session_rc and not dragon_upgrade_overlay_active:
+                        if targeting_ability_name is not None:
+                            targeting_ability_name = None
+                            inspector_message = "Ability targeting cancelled."
+                            redraw()
+                            continue
                         mx_r, my_r = event.pos
                         gmap_rc = game_map
                         if gmap_rc is None:
@@ -1830,6 +2293,47 @@ def run_movement_playtest(
                             and citadel_coord is not None
                         )
                         gmap, dgn, ccd = game_map, dragon, citadel_coord
+
+                        if dragon_upgrade_overlay_active:
+                            if dragon_upgrade_overlay_click is not None:
+                                clk = dragon_upgrade_overlay_click
+                                assert dragon_upgrade_overlay_baseline is not None
+                                base = dragon_upgrade_overlay_baseline
+                                if clk.reset.collidepoint(mx, my):
+                                    dragon_upgrade_draft = []
+                                    redraw()
+                                    continue
+                                if clk.next_day.collidepoint(mx, my):
+                                    total = total_dragon_upgrade_draft_cost(
+                                        base, dragon_upgrade_draft
+                                    )
+                                    if base.gold - total < 0:
+                                        redraw()
+                                        continue
+                                    apply_dragon_upgrade_draft(dgn, list(dragon_upgrade_draft))
+                                    dragon_upgrade_draft = []
+                                    dragon_upgrade_overlay_active = False
+                                    dragon_upgrade_overlay_baseline = None
+                                    dragon_upgrade_overlay_click = None
+                                    dgn.begin_new_day_at_citadel(ccd)
+                                    day_index += 1
+                                    for ent in settlements_by_coord.values():
+                                        ent.on_settlement_phase_end()
+                                    redraw()
+                                    continue
+                                for st, rr in clk.cost.items():
+                                    if rr.collidepoint(mx, my):
+                                        trial = list(dragon_upgrade_draft) + [st]
+                                        if (
+                                            total_dragon_upgrade_draft_cost(base, trial)
+                                            <= base.gold
+                                        ):
+                                            dragon_upgrade_draft.append(st)
+                                        redraw()
+                                        continue
+                            redraw()
+                            continue
+
                         sp_hit = hit_test_gameplay_panel_splitter(
                             mx,
                             my,
@@ -1860,11 +2364,66 @@ def run_movement_playtest(
                         in_map_column = map_left <= mx < map_right_excl
                         in_map_row = map_row_top <= my <= map_row_bottom
 
+                        if (
+                            map_row_top <= my <= map_row_bottom
+                            and mx < dragon_panel_w
+                            and raid_combat_settlement is None
+                        ):
+                            for ability_name, rect in dragon_ability_button_rects.items():
+                                if rect.collidepoint(mx, my):
+                                    result = try_use_ability(
+                                        dgn,
+                                        ability_name,
+                                        world=gmap,
+                                        citadel_coord=ccd,
+                                        settlements_by_coord=settlements_by_coord,
+                                    )
+                                    if result.ok and result.target_required:
+                                        targeting_ability_name = ability_name
+                                        inspector_message = result.reason
+                                    elif result.ok:
+                                        targeting_ability_name = None
+                                        inspector_message = result.reason
+                                    else:
+                                        inspector_message = result.reason
+                                    redraw()
+                                    break
+                            else:
+                                redraw()
+                            continue
+
+                        if targeting_ability_name is not None:
+                            if not in_map_row or not in_map_column:
+                                continue
+                            picked_target = _pick_tile_at_pixel(
+                                float(mx),
+                                float(my),
+                                gmap,
+                                hex_size,
+                                origin,
+                            )
+                            if picked_target is None:
+                                continue
+                            result = try_use_ability(
+                                dgn,
+                                targeting_ability_name,
+                                world=gmap,
+                                citadel_coord=ccd,
+                                settlements_by_coord=settlements_by_coord,
+                                target=picked_target,
+                            )
+                            inspector_message = result.reason
+                            if result.ok:
+                                targeting_ability_name = None
+                            redraw()
+                            continue
+
                         if raid_combat_settlement is not None:
                             if (
                                 raid_overlay_retreat_rect is not None
                                 and raid_overlay_retreat_rect.collidepoint(mx, my)
                             ):
+                                on_combat_ended(dgn)
                                 raid_combat_settlement = None
                                 raid_overlay_banner = ""
                                 raid_overlay_auto_close_deadline_ms = None
@@ -1885,6 +2444,7 @@ def run_movement_playtest(
                                     citadel_coord=ccd,
                                 )
                                 if isinstance(exchange, MoveAttempt):
+                                    on_combat_ended(dgn)
                                     raid_overlay_banner = exchange.reason
                                     raid_combat_settlement = None
                                     raid_overlay_auto_close_deadline_ms = None
@@ -1893,6 +2453,7 @@ def run_movement_playtest(
                                     continue
 
                                 if target.hp <= 0:
+                                    on_combat_ended(dgn)
                                     gold_added, _events = apply_settlement_raid_victory_bundle(
                                         dgn,
                                         target,
@@ -1907,6 +2468,7 @@ def run_movement_playtest(
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
                                     )
                                 elif dgn.hp <= 0:
+                                    on_combat_ended(dgn)
                                     raid_overlay_banner = "Your dragon was defeated."
                                     raid_overlay_auto_close_deadline_ms = (
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
@@ -1948,10 +2510,12 @@ def run_movement_playtest(
                             continue
                         outcome = dgn.move(picked, gmap, ccd)
                         if outcome.ok and dgn.position == ccd:
-                            dgn.begin_new_day_at_citadel(ccd)
-                            day_index += 1
-                            for ent in settlements_by_coord.values():
-                                ent.on_settlement_phase_end()
+                            dragon_upgrade_overlay_active = True
+                            dragon_upgrade_draft = []
+                            dragon_upgrade_overlay_baseline = dragon_upgrade_baseline_from_dragon(
+                                dgn
+                            )
+                            dragon_upgrade_overlay_click = None
                         redraw()
                         continue
 

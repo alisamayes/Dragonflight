@@ -34,3 +34,18 @@ DEFAULT_DRAGON_ATK: int = 10
 DEFAULT_DRAGON_DFN: int = 10
 DEFAULT_DRAGON_FLIGHT_RANGE_HEXES: int = 10
 DEFAULT_DRAGON_SPEED_HEXES_PER_HOUR: float = 10.0
+
+# --- Dragon stat shop (spec §7; end-of-day draft at citadel hub) -----------------
+
+#: Flat gold component in ``200 + level*20 + n*20``.
+DRAGON_STAT_UPGRADE_COST_BASE: int = 200
+#: Gold added per dragon level at the moment of purchase in the draft sequence.
+DRAGON_STAT_UPGRADE_COST_LEVEL_COEFF: int = 20
+#: Gold added per 1-based ordinal ``n`` for that stat (lifetime + draft, incl. this buy).
+DRAGON_STAT_UPGRADE_COST_COUNT_COEFF: int = 20
+
+DRAGON_STAT_UPGRADE_HP_DELTA: int = 50
+DRAGON_STAT_UPGRADE_ATK_DELTA: int = 10
+DRAGON_STAT_UPGRADE_DFN_DELTA: int = 10
+DRAGON_STAT_UPGRADE_FLIGHT_RANGE_HEXES_DELTA: int = 2
+DRAGON_STAT_UPGRADE_SPEED_HEXES_PER_HOUR_DELTA: float = 1.0

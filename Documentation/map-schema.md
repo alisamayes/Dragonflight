@@ -237,7 +237,7 @@ balance validation are deliberately deferred until armies and pathfinding land.
     `River` custom type with `customColor: #3a7bd5`. The example map now
     contains 0 unknown-vocabulary tiles. The unknown-vocab policy was also
     tightened from "warn and fall back to GRASSLAND" to "fail map load with
-    a clear error" (see §5–§7).
+    a clear error" (see §5-§7).
   - Round-2 revision (data-light, schemaVersion unchanged): the example map's
     `name` was changed from `"Untitled Map"` to `"Dev Map"`. The schema doc
     was updated to clarify that JSON `(q, r)` are **odd-q flat-top offset**

@@ -671,7 +671,7 @@ Framework: **pytest** (optional dev dependency in `pyproject.toml`).
 Pygame is distributed as **pre-built wheels** on Windows for recent-but-not-bleeding-edge CPython versions. Brand-new Python releases (e.g. **3.14+**) may lack wheels; pip then tries to **compile Pygame from source**, which often fails on a typical desktop unless full native build tooling is configured.
 
 **Practical guidance:**
-- Prefer a **dedicated virtual environment** using **Python 3.11–3.13** for this project (`pyproject.toml` declares `requires-python = ">=3.11,<3.14"` until Pygame officially supports newer versions).
+- Prefer a **dedicated virtual environment** using **Python 3.11-3.13** for this project (`pyproject.toml` declares `requires-python = ">=3.11,<3.14"` until Pygame officially supports newer versions).
 - You do **not** need to uninstall your existing Python. The OS can hold multiple versions; use the **Python Launcher for Windows** (`py -3.12`) or install another minor version alongside your current one **only if** you want to run Dragonflight while staying on an unsupported-by-Pygame interpreter for other work.
 
 When Pygame publishes wheels for newer Python lines, bump `requires-python` accordingly.
