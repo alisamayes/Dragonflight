@@ -262,7 +262,7 @@ class Village(Settlement):
 
     def __init__(self, position: OffsetCoord, *, aggression: int = 0) -> None:
         super().__init__(
-            hp=400,
+            hp=500,
             max_hp=500,
             eco=500,
             starting_eco=500,
@@ -282,7 +282,7 @@ class City(Settlement):
 
     def __init__(self, position: OffsetCoord, *, aggression: int = 0) -> None:
         super().__init__(
-            hp=800,
+            hp=1000,
             max_hp=1000,
             eco=1000,
             starting_eco=1000,
@@ -302,7 +302,7 @@ class Fort(Settlement):
 
     def __init__(self, position: OffsetCoord, *, aggression: int = 0) -> None:
         super().__init__(
-            hp=600,
+            hp=800,
             max_hp=800,
             eco=100,
             starting_eco=100,

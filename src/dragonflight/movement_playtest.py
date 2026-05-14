@@ -24,6 +24,7 @@ from typing import Literal
 import pygame
 
 from .dragon import Dragon, DragonKind, MoveAttempt
+from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
 from .dragon_abilities import (
     ability_button_enabled,
     ability_requires_target,
@@ -103,7 +104,7 @@ _SEGMENT_GAP: int = 1
 #: Mute factor applied to unreachable terrain RGB components.
 _MUTE_FACTOR: float = 0.42
 
-#: Dragon marker colour (flat filled circle).
+#: Fallback map marker when pixel art is missing.
 _DRAGON_DOT_RGB: tuple[int, int, int] = (0, 0, 0)
 
 _FRAME_RATE: int = 60
@@ -704,6 +705,16 @@ def _draw_dragon_panel(
     y = panel_rect.y + pad
     line_gap = 22
 
+    inner_w = max(1, panel_rect.w - 2 * pad)
+    portrait = load_detailed_sprite(dragon.kind)
+    if portrait is not None:
+        art_max_h = min(200, max(72, int(inner_w * 0.75)))
+        scaled = scaled_to_fit(portrait, inner_w, art_max_h)
+        art_rect = scaled.get_rect()
+        art_rect.topleft = (x, y)
+        surface.blit(scaled, art_rect)
+        y = art_rect.bottom + 10
+
     _draw_text(surface, font, "Dragon", (x, y), _UI_TEXT_RGB)
     y += 28
     _draw_text(
@@ -853,6 +864,12 @@ def _draw_raid_combat_overlay(
     col_dragon_x = cx
     col_settle_x = cx + col_w + inner_pad
     y0 = cy
+    d_portrait = load_detailed_sprite(dragon.kind)
+    if d_portrait is not None:
+        ph = min(72, max(40, overlay.h // 5))
+        ps = scaled_to_fit(d_portrait, col_w, ph)
+        surface.blit(ps, (col_dragon_x, y0))
+        y0 += ps.get_height() + 6
     _draw_text(surface, font_small, "Dragon", (col_dragon_x, y0), _UI_TEXT_RGB)
     _draw_text(surface, font_small, "Settlement", (col_settle_x, y0), _UI_TEXT_RGB)
     y0 += 22
@@ -1752,6 +1769,23 @@ def run_movement_playtest(
                         _UI_MUTED_TEXT_RGB,
                     )
 
+                pick_list_w = min(520, win_w - 120)
+                list_right = 60 + pick_list_w
+                preview_img = load_detailed_sprite(session_dragon_kind)
+                if preview_img is not None:
+                    slot_x = list_right + 28
+                    slot_w = win_w - slot_x - 28
+                    if slot_w >= 120:
+                        slot_h = min(280, win_h - y0 - 40)
+                        portrait = scaled_to_fit(preview_img, slot_w, max(80, slot_h))
+                        surf.blit(portrait, (slot_x, y0))
+                    else:
+                        below_y = btn_play.bottom + 20
+                        slot_h = min(200, win_h - below_y - 90)
+                        if slot_h >= 72:
+                            portrait = scaled_to_fit(preview_img, pick_list_w, slot_h)
+                            surf.blit(portrait, (60, below_y))
+
                 if new_game_status:
                     _draw_text(surf, font, new_game_status, (60, win_h - 110), (240, 120, 120))
 
@@ -1791,8 +1825,19 @@ def run_movement_playtest(
                 )
 
                 cx, cy = _dragon_screen_center(dragon.position, hex_size, origin)
-                radius = max(3, int(hex_size * 0.18))
-                pygame.draw.circle(surf, _DRAGON_DOT_RGB, (int(round(cx)), int(round(cy))), radius)
+                marker_side = int(max(8, min(hex_size * 1.35, hex_size * 1.55) * 2))
+                marker = map_marker_surface(dragon.kind, marker_side)
+                if marker is not None:
+                    mrect = marker.get_rect(center=(int(round(cx)), int(round(cy))))
+                    surf.blit(marker, mrect)
+                else:
+                    radius = max(3, int(hex_size * 0.18))
+                    pygame.draw.circle(
+                        surf,
+                        _DRAGON_DOT_RGB,
+                        (int(round(cx)), int(round(cy))),
+                        radius,
+                    )
                 surf.set_clip(clip_prev)
 
                 dragon_panel_rect = pygame.Rect(0, TIME_BAR_HEIGHT, dragon_panel_w, map_area_h)
