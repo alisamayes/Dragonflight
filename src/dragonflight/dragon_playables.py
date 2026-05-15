@@ -203,7 +203,7 @@ class Yellowgon(Dragon):
     DISPLAY_NAME: ClassVar[str] = "Yellowgon (Yellow)"
     SELECTION_DESCRIPTION: ClassVar[str] = (
         "Yellowgon is able to manipulate time. Slowing it down to their advantage to affect the world around them, forsee and prevent incoming damage,"
-        "and even temporarliy freeze it to travel or strike without consequences." 
+        "and even temporarliy freeze it to travel or strike without consequences."
     )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (

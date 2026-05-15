@@ -50,6 +50,8 @@ class TestArmySpawnStats:
         army = Army.spawn_from_settlement(village)
 
         assert army.hp == village.max_hp * 66 // 100
+        assert army.max_hp == army.hp
+        assert army.max_hp == village.max_hp * 66 // 100
         assert army.atk == village.atk * 90 // 100
         assert army.dfn == village.dfn * 50 // 100
         assert army.movement_speed == DEFAULT_ARMY_MOVEMENT_SPEED
@@ -133,8 +135,22 @@ class TestArmyPhase:
             (2, 1, Terrain.CITADEL),
         )
         citadel = OffsetCoord(2, 1)
-        near = Army(hp=10, atk=1, dfn=1, movement_speed=1, position=OffsetCoord(1, 1))
-        far = Army(hp=10, atk=1, dfn=1, movement_speed=8, position=OffsetCoord(0, 1))
+        near = Army(
+            hp=10,
+            max_hp=10,
+            atk=1,
+            dfn=1,
+            movement_speed=1,
+            position=OffsetCoord(1, 1),
+        )
+        far = Army(
+            hp=10,
+            max_hp=10,
+            atk=1,
+            dfn=1,
+            movement_speed=8,
+            position=OffsetCoord(0, 1),
+        )
 
         result = run_army_phase(
             game_map, [far, near], citadel_coord=citadel, citadel_hp=DEFAULT_CITADEL_HP
@@ -148,22 +164,42 @@ class TestArmyPhase:
     def test_merge_sums_stats_keeps_max_speed(self) -> None:
         merged = merge_army_stacks(
             [
-                Army(hp=10, atk=5, dfn=2, movement_speed=4, position=OffsetCoord(0, 0)),
-                Army(hp=20, atk=7, dfn=3, movement_speed=8, position=OffsetCoord(0, 0)),
+                Army(
+                    hp=10,
+                    max_hp=10,
+                    atk=5,
+                    dfn=2,
+                    movement_speed=4,
+                    position=OffsetCoord(0, 0),
+                ),
+                Army(
+                    hp=20,
+                    max_hp=25,
+                    atk=7,
+                    dfn=3,
+                    movement_speed=8,
+                    position=OffsetCoord(0, 0),
+                ),
             ]
         )
         assert len(merged) == 1
         assert merged[0].hp == 30
+        assert merged[0].max_hp == 35
         assert merged[0].atk == 12
         assert merged[0].dfn == 5
         assert merged[0].movement_speed == 8
 
     def test_citadel_game_over_at_zero_hp(self) -> None:
         game_map = _coord_map((0, 1, Terrain.GRASSLAND), (1, 1, Terrain.CITADEL))
-        army = Army(hp=1, atk=1, dfn=1, movement_speed=8, position=OffsetCoord(0, 1))
-        result = run_army_phase(
-            game_map, [army], citadel_coord=OffsetCoord(1, 1), citadel_hp=1
+        army = Army(
+            hp=1,
+            max_hp=1,
+            atk=1,
+            dfn=1,
+            movement_speed=8,
+            position=OffsetCoord(0, 1),
         )
+        result = run_army_phase(game_map, [army], citadel_coord=OffsetCoord(1, 1), citadel_hp=1)
 
         assert result.game_over
         assert result.citadel_hp == 0
@@ -183,7 +219,14 @@ class TestCitadelState:
 
 class TestArmyCombat:
     def test_validate_requires_same_hex(self) -> None:
-        army = Army(hp=100, atk=10, dfn=10, movement_speed=8, position=OffsetCoord(1, 0))
+        army = Army(
+            hp=100,
+            max_hp=100,
+            atk=10,
+            dfn=10,
+            movement_speed=8,
+            position=OffsetCoord(1, 0),
+        )
         dragon = Dragon(DragonKind.RED_FIRE, OffsetCoord(0, 0))
         world = _coord_map((0, 0, Terrain.GRASSLAND), (1, 0, Terrain.GRASSLAND))
         ok, reason = validate_dragon_vs_army(dragon, army, world)
@@ -192,7 +235,14 @@ class TestArmyCombat:
 
     def test_combat_round_updates_army_hp(self) -> None:
         coord = OffsetCoord(0, 0)
-        army = Army(hp=500, atk=50, dfn=30, movement_speed=8, position=coord)
+        army = Army(
+            hp=500,
+            max_hp=500,
+            atk=50,
+            dfn=30,
+            movement_speed=8,
+            position=coord,
+        )
         dragon = Dragon(
             kind=DragonKind.RED_FIRE,
             position=coord,
@@ -202,13 +252,19 @@ class TestArmyCombat:
             hours_remaining=24.0,
         )
         world = _coord_map((0, 0, Terrain.GRASSLAND))
-        exchange = resolve_army_combat_round(
-            dragon, army, world, citadel_coord=OffsetCoord(5, 0)
-        )
+        exchange = resolve_army_combat_round(dragon, army, world, citadel_coord=OffsetCoord(5, 0))
         assert isinstance(exchange, DamageRoundExchange)
         assert army.hp == exchange.target_hp_after
         assert army.hp < 500
+        assert army.max_hp == 500
 
     def test_defeated_army_at_zero_hp(self) -> None:
-        army = Army(hp=0, atk=1, dfn=1, movement_speed=8, position=OffsetCoord(0, 0))
+        army = Army(
+            hp=0,
+            max_hp=100,
+            atk=1,
+            dfn=1,
+            movement_speed=8,
+            position=OffsetCoord(0, 0),
+        )
         assert army.is_defeated()

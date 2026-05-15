@@ -6,10 +6,10 @@ from collections.abc import Callable
 
 import pytest
 
+from dragonflight.army import Army
 from dragonflight.dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
-from dragonflight.army import Army
 from dragonflight.settlement import (
     City,
     Fort,
@@ -41,9 +41,9 @@ class TestStartingStats:
     @pytest.mark.parametrize(
         ("settlement", "settlement_type", "hp", "eco", "atk", "dfn", "threshold"),
         [
-            (Village(OffsetCoord(1, 1)), SettlementType.VILLAGE, 500, 500, 60, 40, 500),
-            (City(OffsetCoord(2, 2)), SettlementType.CITY, 1000, 1000, 100, 100, 600),
-            (Fort(OffsetCoord(3, 3)), SettlementType.FORT, 800, 100, 90, 120, 300),
+            (Village(OffsetCoord(1, 1)), SettlementType.VILLAGE, 500, 500, 50, 30, 500),
+            (City(OffsetCoord(2, 2)), SettlementType.CITY, 1000, 1000, 70, 80, 600),
+            (Fort(OffsetCoord(3, 3)), SettlementType.FORT, 800, 100, 80, 80, 300),
         ],
     )
     def test_subclasses_have_specified_baselines(
@@ -104,8 +104,8 @@ class TestSettlementPhase:
         assert city.hp == 500
         assert city.max_hp == 1000
         assert city.eco == 1000
-        assert city.atk == 100
-        assert city.dfn == 100
+        assert city.atk == 70
+        assert city.dfn == 80
 
     def test_settlement_at_zero_heals_eighty_percent_of_max(self) -> None:
         fort = Fort(OffsetCoord(0, 0))
@@ -128,8 +128,8 @@ class TestSettlementPhase:
         assert outcome.hp_delta == 0
         assert outcome.max_hp_delta == 0
         assert city.eco == 1100
-        assert city.atk == 105
-        assert city.dfn == 105
+        assert city.atk == 75
+        assert city.dfn == 85
 
     def test_undamaged_village_grows(self) -> None:
         village = Village(OffsetCoord(0, 0))
@@ -140,8 +140,8 @@ class TestSettlementPhase:
         assert village.max_hp == 500
         assert village.hp == 500
         assert village.eco == 550
-        assert village.atk == 65
-        assert village.dfn == 45
+        assert village.atk == 55
+        assert village.dfn == 35
 
 
 class TestSettlementRaidResolution:
@@ -204,15 +204,13 @@ class TestSettlementCombat:
             kind=DragonKind.RED_FIRE, position=OffsetCoord(0, 0), hp=500, atk=120, dfn=90
         )
 
-        exchange = settlement.run_combat_round(
-            dragon, _world(), citadel_coord=OffsetCoord(0, 0)
-        )
+        exchange = settlement.run_combat_round(dragon, _world(), citadel_coord=OffsetCoord(0, 0))
 
         assert isinstance(exchange, DamageRoundExchange)
-        assert exchange.damage_to_target == 54  # 120 * 100 // (100 + 120)
-        assert exchange.damage_to_dragon == 47  # 90 * 100 // (100 + 90)
-        assert settlement.hp == 746
-        assert dragon.hp == 453
+        assert exchange.damage_to_target == 66  # 120 * 100 // (100 + settlement_def_round)
+        assert exchange.damage_to_dragon == 42  # 90 * 100 // (100 + effective_atk_proxy)
+        assert settlement.hp == 734
+        assert dragon.hp == 458
         assert dragon.hours_remaining == pytest.approx(23.5)
 
     def test_loop_callback_controls_continuation_without_stdin(self) -> None:
@@ -238,7 +236,7 @@ class TestSettlementCombat:
         assert result.rounds_resolved == 1
         assert result.retreated is True
         assert calls == 1
-        assert settlement.hp == 746
+        assert settlement.hp == 734
 
     def test_loop_can_fire_raid_bundle_when_settlement_hp_hits_zero(self) -> None:
         settlement = Fort(OffsetCoord(0, 0))
@@ -263,8 +261,8 @@ class TestSettlementCombat:
         assert result.rounds_resolved == 2
         assert settlement.hp == 0
         assert settlement.eco == 50
-        assert settlement.atk == 80
-        assert settlement.dfn == 110
+        assert settlement.atk == 70
+        assert settlement.dfn == 70
         assert result.spawn_events == (
             Army.spawn_from_settlement(settlement),
             Army.spawn_from_settlement(nearby),
@@ -292,9 +290,7 @@ class TestSettlementCombat:
             tiles={coord: Tile(coord=coord, terrain=Terrain.SETTLEMENT)},
         )
         citadel_far = OffsetCoord(5, 0)
-        out = resolve_settlement_combat_round(
-            dragon, settlement, world, citadel_coord=citadel_far
-        )
+        out = resolve_settlement_combat_round(dragon, settlement, world, citadel_coord=citadel_far)
         assert isinstance(out, MoveAttempt)
         assert not out.ok
         assert "citadel" in out.reason.lower() or "nightfall" in out.reason.lower()

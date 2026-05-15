@@ -19,7 +19,6 @@ from .dragon_defaults import (
     DEFAULT_DRAGON_LEVEL,
     DEFAULT_DRAGON_MAX_HP,
     DEFAULT_DRAGON_SPEED_HEXES_PER_HOUR,
-    DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX,
     DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING,
     HOURS_PER_DAMAGE_ROUND,
     HOURS_PER_DRAGON_DAY,
@@ -28,6 +27,7 @@ from .hex_coord import OffsetCoord, distance, offset_to_axial
 from .terrain import Terrain
 
 if TYPE_CHECKING:
+    from .game_tuning import GameTuning
     from .map_state import GameMap
 
 
@@ -123,33 +123,50 @@ class Dragon:
 
         return Redgon.new_at(citadel_coord)
 
-    def begin_new_day_at_citadel(self, citadel_coord: OffsetCoord) -> None:
+    def begin_new_day_at_citadel(
+        self,
+        citadel_coord: OffsetCoord,
+        *,
+        tuning: GameTuning | None = None,
+    ) -> None:
         """Phase boundary: citadel rest heal, then reset daily hours (spec §2 Citadel → next day).
 
         Healing uses hours still on the clock **before** the reset: base percent of ``max_hp``
-        plus bonus percent per hour remaining (see :mod:`dragonflight.dragon_defaults`).
+        (from tuning or defaults) plus bonus percent per hour remaining (see
+        :mod:`dragonflight.dragon_defaults`).
         """
         from .dragon_abilities import begin_new_turn, synchronize_unlocked_abilities
 
         synchronize_unlocked_abilities(self)
-        self._apply_citadel_end_of_day_healing()
+        self._apply_citadel_end_of_day_healing(tuning=tuning)
         self.position = citadel_coord
         self.hours_remaining = HOURS_PER_DRAGON_DAY
         self._activatable_uses_remaining_today = (1, 1)
         begin_new_turn(self)
 
-    def _citadel_end_of_day_heal_points(self) -> int:
+    def _citadel_end_of_day_heal_points(
+        self,
+        *,
+        tuning: GameTuning | None = None,
+    ) -> int:
         """Integer HP restored this dock from ``max_hp`` and :attr:`hours_remaining`."""
 
+        from .game_tuning import resolve_tuning
+
+        t = resolve_tuning(tuning)
         hrs = max(0.0, float(self.hours_remaining))
         total_percent = (
-            float(DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX)
+            float(t.dragon_citadel_end_of_day_base_heal_percent_of_max)
             + float(DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING) * hrs
         )
         return int(round(self.max_hp * total_percent / 100.0))
 
-    def _apply_citadel_end_of_day_healing(self) -> None:
-        gained = self._citadel_end_of_day_heal_points()
+    def _apply_citadel_end_of_day_healing(
+        self,
+        *,
+        tuning: GameTuning | None = None,
+    ) -> None:
+        gained = self._citadel_end_of_day_heal_points(tuning=tuning)
         self.hp = min(self.max_hp, self.hp + gained)
 
     def hex_distance_to(self, target: OffsetCoord) -> int:
@@ -341,16 +358,51 @@ class Dragon:
         army_dfn: int,
         world: GameMap,
     ) -> DamageRoundExchange | MoveAttempt:
-        """Convenience wrapper for army engagements (spec §8 Army Combat).
+        """Resolve one damage round vs an army using the same rules as settlement combat.
 
-        Map parameter reserved for forthcoming range/line-of-flight checks —
-        intentionally unused beyond signature stability for upcoming systems.
+        Pass ``army_dfn`` after tile modifiers (e.g. Tremors) at the resolver boundary.
         """
-        del world  # Future: choke points, retaliation triggers, morale hooks.
-        return self.attack_round_vs_target(
-            target_hp=army_hp,
-            target_atk=army_atk,
-            target_dfn=army_dfn,
+
+        from .dragon_abilities import (
+            effective_attack,
+            outgoing_combat_damage_multiplier,
+            vivify_attack_bonus,
+        )
+
+        base_attack = effective_attack(self, world=world) + vivify_attack_bonus(self)
+        boosted_attack = max(
+            1, int(round(base_attack * outgoing_combat_damage_multiplier(self)))
+        )
+        if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
+            return MoveAttempt(ok=False, reason="not enough daily time for a damage round")
+        dragon_to_target = damage_dragon_attacks(boosted_attack, army_dfn)
+        from .dragon_abilities import (
+            apply_time_spent,
+            effective_defence,
+            enemy_can_retaliate,
+            mitigated_damage_taken,
+            thorns_damage,
+        )
+
+        raw_target_to_dragon = (
+            damage_human_or_army_attacks(army_atk, effective_defence(self))
+            if enemy_can_retaliate(self)
+            else 0
+        )
+        target_to_dragon = mitigated_damage_taken(self, raw_target_to_dragon)
+        next_target_hp = max(
+            0, army_hp - dragon_to_target - thorns_damage(self, raw_target_to_dragon)
+        )
+        next_dragon_hp = max(0, self.hp - target_to_dragon)
+        self.hours_remaining -= HOURS_PER_DAMAGE_ROUND
+        apply_time_spent(self, HOURS_PER_DAMAGE_ROUND)
+        self.hp = next_dragon_hp
+        return DamageRoundExchange(
+            dragon_hp_after=self.hp,
+            target_hp_after=next_target_hp,
+            damage_to_target=army_hp - next_target_hp,
+            damage_to_dragon=target_to_dragon,
+            hours_spent=HOURS_PER_DAMAGE_ROUND,
         )
 
     def attack_settlement(
@@ -367,13 +419,13 @@ class Dragon:
         """
         from .dragon_abilities import (
             effective_attack,
-            outgoing_settlement_damage_multiplier,
+            outgoing_combat_damage_multiplier,
             vivify_attack_bonus,
         )
 
         base_attack = effective_attack(self, world=world) + vivify_attack_bonus(self)
         boosted_attack = max(
-            1, int(round(base_attack * outgoing_settlement_damage_multiplier(self)))
+            1, int(round(base_attack * outgoing_combat_damage_multiplier(self)))
         )
         if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
             return MoveAttempt(ok=False, reason="not enough daily time for a damage round")

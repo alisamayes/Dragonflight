@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ from typing import Any, Literal
 
 import pygame
 
+from .army import Army
+from .combat_preview import preview_army_round, preview_settlement_round
 from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from .dragon_abilities import (
     ability_button_enabled,
@@ -58,6 +61,7 @@ from .dragon_progression import (
     total_dragon_upgrade_draft_cost,
 )
 from .dragon_ui_theme import DragonUITheme, dragon_ui_theme_for_kind
+from .game_tuning import GameTuning, default_game_tuning
 from .hex_coord import HEX_CORNERS, OffsetCoord, offset_to_pixel
 from .hour_bar_layout import hour_bar_segment_layout
 from .map_loader import MapLoadError, load_map
@@ -155,6 +159,9 @@ _UI_PANEL_RGB: tuple[int, int, int] = (38, 41, 52)
 _UI_BORDER_RGB: tuple[int, int, int] = (85, 90, 110)
 _UI_TEXT_RGB: tuple[int, int, int] = (235, 235, 245)
 _UI_MUTED_TEXT_RGB: tuple[int, int, int] = (175, 175, 190)
+
+#: Muted red for projected damage suffix on combat overlays (HP line only).
+_UI_DAMAGE_PREVIEW_RGB: tuple[int, int, int] = (200, 95, 95)
 _UI_BUTTON_RGB: tuple[int, int, int] = (60, 66, 86)
 _UI_BUTTON_HOVER_RGB: tuple[int, int, int] = (74, 82, 108)
 _UI_BUTTON_ACTIVE_RGB: tuple[int, int, int] = (96, 106, 140)
@@ -340,6 +347,25 @@ def _draw_text(
     surface.blit(font.render(text, True, rgb), pos)
 
 
+def _draw_muted_hp_line_with_damage_preview(
+    surface: pygame.Surface,
+    font_small: pygame.font.Font,
+    *,
+    x: int,
+    y: int,
+    hp_line: str,
+    damage: int,
+) -> None:
+    """Draw a muted HP line and a red ``  - {damage}`` suffix when ``damage > 0``."""
+
+    _draw_text(surface, font_small, hp_line, (x, y), _UI_MUTED_TEXT_RGB)
+    if damage <= 0:
+        return
+    rendered = font_small.render(hp_line, True, _UI_MUTED_TEXT_RGB)
+    suffix = f"  - {damage}"
+    _draw_text(surface, font_small, suffix, (x + rendered.get_width(), y), _UI_DAMAGE_PREVIEW_RGB)
+
+
 def _draw_button(
     surface: pygame.Surface,
     font: pygame.font.Font,
@@ -359,6 +385,60 @@ def _draw_button(
     tx = rect.x + (rect.w - text_surf.get_width()) // 2
     ty = rect.y + (rect.h - text_surf.get_height()) // 2
     surface.blit(text_surf, (tx, ty))
+
+
+def _game_options_slider_defs() -> tuple[tuple[str, str, int, int], ...]:
+    """``(GameTuning attribute, label, min, max)`` for Game Options sliders."""
+
+    return (
+        ("army_movement_speed", "Army speed", 1, 24),
+        ("nearby_radius_map_width_percent", "Aggro range (% of map width)", 0, 100),
+        ("settlement_growth_eco_percent", "Settlement growth — eco %", 0, 100),
+        ("settlement_growth_stat_bonus", "Settlement growth — ATK / DFN bonus", 0, 50),
+        ("settlement_eco_growth_scale_percent", "Eco growth rate (scale %)", 10, 200),
+        ("raid_eco_loss_divisor", "Raid defeat — eco divisor", 1, 10),
+        ("raid_stat_loss", "Raid defeat — stat loss", 0, 50),
+        ("settlement_heal_percent_of_max_at_zero", "Settlement heal at 0 HP (% of max)", 0, 100),
+        (
+            "settlement_heal_percent_of_max_when_damaged",
+            "Settlement heal when damaged (% of max)",
+            0,
+            100,
+        ),
+        (
+            "dragon_citadel_end_of_day_base_heal_percent_of_max",
+            "End-of-day dragon base heal (% of max HP)",
+            0,
+            100,
+        ),
+    )
+
+
+def _game_options_slider_value_label(attr: str, value: int) -> str:
+    if attr in (
+        "nearby_radius_map_width_percent",
+        "settlement_growth_eco_percent",
+        "settlement_eco_growth_scale_percent",
+        "settlement_heal_percent_of_max_at_zero",
+        "settlement_heal_percent_of_max_when_damaged",
+        "dragon_citadel_end_of_day_base_heal_percent_of_max",
+    ):
+        return f"{value}%"
+    return str(value)
+
+
+def _game_options_set_slider_from_mouse(
+    game_tuning: GameTuning,
+    attr: str,
+    mouse_x: int,
+    track: pygame.Rect,
+    lo: int,
+    hi: int,
+) -> None:
+    t = (mouse_x - track.x) / max(1, track.w)
+    t = max(0.0, min(1.0, t))
+    v = int(round(lo + t * (hi - lo)))
+    setattr(game_tuning, attr, v)
 
 
 def _draw_info_panel_chrome(
@@ -839,10 +919,11 @@ def _fallback_army_from_spawn_event(
 
 
 def _spawn_armies_from_events(
-    events: list[MockArmySpawnEvent],
+    events: Sequence[Army | MockArmySpawnEvent],
     *,
     settlements_by_coord: dict[OffsetCoord, Settlement],
     active_armies: list[Any],
+    tuning: GameTuning | None = None,
 ) -> int:
     """Append armies for spawn events; returns count added."""
 
@@ -851,9 +932,13 @@ def _spawn_armies_from_events(
     sim = _try_import_army_sim()
     added = 0
     for event in events:
+        if isinstance(event, Army):
+            active_armies.append(event)
+            added += 1
+            continue
         settlement = settlements_by_coord.get(event.position)
         if sim is not None and hasattr(sim, "army_from_spawn_event"):
-            army = sim.army_from_spawn_event(event, settlement)
+            army = sim.army_from_spawn_event(event, settlement, tuning=tuning)
         else:
             army = _fallback_army_from_spawn_event(event, settlements_by_coord)
         active_armies.append(army)
@@ -929,14 +1014,22 @@ def _resolve_army_combat_round(
     if not budget.ok:
         return budget
 
+    from .dragon_abilities import (
+        apply_ice_talons_to_army,
+        enemy_defence_for_round,
+        on_combat_round_started,
+    )
+
+    on_combat_round_started(dragon)
     exchange = dragon.attack_army(
         army_hp=_army_hp(army),
         army_atk=int(army.atk),
-        army_dfn=int(army.dfn),
+        army_dfn=enemy_defence_for_round(dragon, _army_position(army), int(army.dfn)),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):
         _set_army_hp(army, exchange.target_hp_after)
+        apply_ice_talons_to_army(dragon, army)
     return exchange
 
 
@@ -1221,6 +1314,7 @@ def _draw_raid_combat_overlay(
     *,
     theme: DragonUITheme,
     map_viewport: pygame.Rect,
+    game_map: GameMap,
     dragon: Dragon,
     settlement: Settlement,
     banner: str,
@@ -1265,13 +1359,34 @@ def _draw_raid_combat_overlay(
         f"ATK: {settlement.atk}",
         f"DFN: {settlement.dfn}",
     )
+    rd_prev = preview_settlement_round(dragon, settlement, game_map)
     yd = y0
-    for line in d_lines:
-        _draw_text(surface, font_small, line, (col_dragon_x, yd), _UI_MUTED_TEXT_RGB)
+    for i, line in enumerate(d_lines):
+        if i == 0:
+            _draw_muted_hp_line_with_damage_preview(
+                surface,
+                font_small,
+                x=col_dragon_x,
+                y=yd,
+                hp_line=line,
+                damage=rd_prev.damage_to_dragon,
+            )
+        else:
+            _draw_text(surface, font_small, line, (col_dragon_x, yd), _UI_MUTED_TEXT_RGB)
         yd += 20
     ys = y0
-    for line in s_lines:
-        _draw_text(surface, font_small, line, (col_settle_x, ys), _UI_MUTED_TEXT_RGB)
+    for i, line in enumerate(s_lines):
+        if i == 0:
+            _draw_muted_hp_line_with_damage_preview(
+                surface,
+                font_small,
+                x=col_settle_x,
+                y=ys,
+                hp_line=line,
+                damage=rd_prev.damage_to_enemy,
+            )
+        else:
+            _draw_text(surface, font_small, line, (col_settle_x, ys), _UI_MUTED_TEXT_RGB)
         ys += 20
 
     mid_y = max(yd, ys) + 10
@@ -1310,6 +1425,7 @@ def _draw_army_combat_overlay(
     *,
     theme: DragonUITheme,
     map_viewport: pygame.Rect,
+    game_map: GameMap,
     dragon: Dragon,
     army: Any,
     banner: str,
@@ -1344,7 +1460,7 @@ def _draw_army_combat_overlay(
     _draw_text(surface, font_small, "Dragon", (col_dragon_x, y0), _UI_TEXT_RGB)
     _draw_text(surface, font_small, "Army", (col_army_x, y0), _UI_TEXT_RGB)
     y0 += 22
-    army_max_hp = int(getattr(army, "max_hp", _army_hp(army)))
+    army_max_hp = int(army.max_hp)
     d_lines = (
         f"HP: {dragon.hp} / {dragon.max_hp}",
         f"ATK: {dragon.atk}",
@@ -1355,13 +1471,34 @@ def _draw_army_combat_overlay(
         f"ATK: {int(army.atk)}",
         f"DFN: {int(army.dfn)}",
     )
+    army_prev = preview_army_round(dragon, army, game_map)
     yd = y0
-    for line in d_lines:
-        _draw_text(surface, font_small, line, (col_dragon_x, yd), _UI_MUTED_TEXT_RGB)
+    for i, line in enumerate(d_lines):
+        if i == 0:
+            _draw_muted_hp_line_with_damage_preview(
+                surface,
+                font_small,
+                x=col_dragon_x,
+                y=yd,
+                hp_line=line,
+                damage=army_prev.damage_to_dragon,
+            )
+        else:
+            _draw_text(surface, font_small, line, (col_dragon_x, yd), _UI_MUTED_TEXT_RGB)
         yd += 20
     ya = y0
-    for line in a_lines:
-        _draw_text(surface, font_small, line, (col_army_x, ya), _UI_MUTED_TEXT_RGB)
+    for i, line in enumerate(a_lines):
+        if i == 0:
+            _draw_muted_hp_line_with_damage_preview(
+                surface,
+                font_small,
+                x=col_army_x,
+                y=ya,
+                hp_line=line,
+                damage=army_prev.damage_to_enemy,
+            )
+        else:
+            _draw_text(surface, font_small, line, (col_army_x, ya), _UI_MUTED_TEXT_RGB)
         ya += 20
 
     mid_y = max(yd, ya) + 10
@@ -2039,7 +2176,7 @@ def run_movement_playtest(
 
         day_index = 1
         # Screens: main_menu, new_game_maps, new_game_dragon, game, settings,
-        # map_creator_setup, map_creator_editor, map_editor
+        # game_options, map_creator_setup, map_creator_editor, map_editor
         screen: str = "game" if skip_menus else "main_menu"
         new_game_map_scroll: int = 0
         new_game_status: str = ""
@@ -2047,6 +2184,10 @@ def run_movement_playtest(
         dragon_pick_context: DragonPickContext | None = None
         focused_field: str | None = None  # dims | name
         settings_status: str = ""
+        game_tuning: GameTuning = default_game_tuning()
+        game_options_scroll: int = 0
+        game_options_drag_attr: str | None = None
+        game_options_track_rects: dict[str, pygame.Rect] = {}
 
         draft = _MapCreatorDraft(
             dims=_TextField("Map size (e.g. 50x50)", "30x30", pygame.Rect(60, 170, 260, 36)),
@@ -2236,6 +2377,7 @@ def run_movement_playtest(
             nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
             nonlocal dragon_panel_scroll, inspector_panel_scroll
+            nonlocal game_tuning
             if pending_map_path is None:
                 return False, "No map selected."
             try:
@@ -2281,6 +2423,9 @@ def run_movement_playtest(
             _sync_settlements_from_map()
             _ensure_window_meets_gameplay_floors()
             screen = "game"
+            pick_ctx = dragon_pick_context
+            if pick_ctx == "new_game":
+                game_tuning = default_game_tuning()
             dragon_pick_context = None
             return True, ""
 
@@ -2295,6 +2440,8 @@ def run_movement_playtest(
             nonlocal raid_overlay_attack_rect, raid_overlay_retreat_rect
             nonlocal army_overlay_attack_rect, army_overlay_retreat_rect
             nonlocal dragon_upgrade_overlay_click
+            nonlocal game_options_track_rects
+            nonlocal game_options_scroll
             surf = pygame.display.get_surface()
             surf.fill(BACKGROUND_COLOR)
 
@@ -2630,6 +2777,7 @@ def run_movement_playtest(
                         font_small,
                         theme=ui_theme,
                         map_viewport=map_viewport,
+                        game_map=game_map,
                         dragon=dragon,
                         settlement=raid_combat_settlement,
                         banner=raid_overlay_banner,
@@ -2645,6 +2793,7 @@ def run_movement_playtest(
                         font_small,
                         theme=ui_theme,
                         map_viewport=map_viewport,
+                        game_map=game_map,
                         dragon=dragon,
                         army=army_combat_target,
                         banner=army_overlay_banner,
@@ -2714,13 +2863,21 @@ def run_movement_playtest(
                 _draw_text(surf, font_big, "Settings", (60, 60), _UI_TEXT_RGB)
 
                 mx, my = pygame.mouse.get_pos()
-                btn_creator = pygame.Rect(60, 130, 260, 40)
-                btn_loader = pygame.Rect(60, 182, 260, 40)
-                btn_editor = pygame.Rect(60, 234, 260, 40)
-                btn_new_game = pygame.Rect(60, 286, 260, 40)
-                btn_dev = pygame.Rect(60, 338, 260, 40)
+                btn_game_opts = pygame.Rect(60, 130, 260, 40)
+                btn_creator = pygame.Rect(60, 182, 260, 40)
+                btn_loader = pygame.Rect(60, 234, 260, 40)
+                btn_editor = pygame.Rect(60, 286, 260, 40)
+                btn_new_game = pygame.Rect(60, 338, 260, 40)
+                btn_dev = pygame.Rect(60, 390, 260, 40)
                 btn_back = pygame.Rect(60, win_h - 70, 120, 36)
 
+                _draw_button(
+                    surf,
+                    font_mid,
+                    btn_game_opts,
+                    "Game Options",
+                    hovered=btn_game_opts.collidepoint(mx, my),
+                )
                 _draw_button(
                     surf,
                     font_mid,
@@ -2760,7 +2917,7 @@ def run_movement_playtest(
                     surf,
                     font,
                     "Load + edit; Save overwrites the file.",
-                    (60, 386),
+                    (60, 438),
                     _UI_MUTED_TEXT_RGB,
                 )
                 _draw_button(
@@ -2768,7 +2925,62 @@ def run_movement_playtest(
                 )
 
                 if settings_status:
-                    _draw_text(surf, font, settings_status, (60, 426), _UI_MUTED_TEXT_RGB)
+                    _draw_text(surf, font, settings_status, (60, 478), _UI_MUTED_TEXT_RGB)
+
+            elif screen == "game_options":
+                surf.fill(_UI_BG_RGB)
+                game_options_track_rects = {}
+                _draw_text(surf, font_big, "Game Options", (60, 60), _UI_TEXT_RGB)
+                _draw_text(
+                    surf,
+                    font,
+                    "Session tuning — applies on the next phase / raid / spawn / end-of-day heal.",
+                    (60, 95),
+                    _UI_MUTED_TEXT_RGB,
+                )
+                mx, my = pygame.mouse.get_pos()
+                panel = pygame.Rect(40, 120, win_w - 80, win_h - 200)
+                pygame.draw.rect(surf, _UI_PANEL_RGB, panel, border_radius=8)
+                pygame.draw.rect(surf, _UI_BORDER_RGB, panel, width=1, border_radius=8)
+
+                inner = panel.inflate(-16, -16)
+                row_h = 54
+                defs = _game_options_slider_defs()
+                content_h = len(defs) * row_h + 24
+                scroll_max = max(0, content_h - inner.h)
+                game_options_scroll = max(0, min(game_options_scroll, scroll_max))
+
+                clip_prev = surf.get_clip()
+                surf.set_clip(inner)
+                track_w = max(120, min(340, inner.w - 100))
+                y_cursor = inner.y + 8 - game_options_scroll
+                x_label = inner.x + 4
+                for attr, label, lo, hi in defs:
+                    y = y_cursor
+                    y_cursor += row_h
+                    if y + row_h < inner.top or y > inner.bottom:
+                        continue
+                    _draw_text(surf, font_small, label, (x_label, y), _UI_TEXT_RGB)
+                    track = pygame.Rect(x_label, y + 22, track_w, 12)
+                    val = getattr(game_tuning, attr)
+                    frac = (val - lo) / max(1, (hi - lo))
+                    pygame.draw.rect(surf, _UI_INPUT_RGB, track, border_radius=4)
+                    pygame.draw.rect(surf, _UI_BORDER_RGB, track, width=1, border_radius=4)
+                    knob_w = max(6, int(track.w * 0.04))
+                    kx = int(track.x + frac * max(0, track.w - knob_w))
+                    knob = pygame.Rect(kx, track.y - 2, knob_w, track.h + 4)
+                    pygame.draw.rect(surf, _UI_BUTTON_HOVER_RGB, knob, border_radius=3)
+                    pygame.draw.rect(surf, _UI_BORDER_RGB, knob, width=1, border_radius=3)
+                    val_s = _game_options_slider_value_label(attr, val)
+                    _draw_text(surf, font_small, val_s, (track.right + 10, y + 20), _UI_TEXT_RGB)
+                    game_options_track_rects[attr] = track.inflate(0, 12)
+
+                surf.set_clip(clip_prev)
+
+                btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                _draw_button(
+                    surf, font_mid, btn_back, "Back", hovered=btn_back.collidepoint(mx, my)
+                )
 
             elif screen == "map_creator_setup":
                 surf.fill(_UI_BG_RGB)
@@ -2970,6 +3182,11 @@ def run_movement_playtest(
                         draft.error = ""
                         redraw()
                         continue
+                    if screen == "game_options":
+                        screen = "settings"
+                        game_options_drag_attr = None
+                        redraw()
+                        continue
                     if screen == "settings":
                         screen = "game"
                         settings_status = ""
@@ -2982,6 +3199,16 @@ def run_movement_playtest(
                     continue
                 if event.type == pygame.MOUSEWHEEL and screen == "new_game_maps":
                     new_game_map_scroll = max(0, new_game_map_scroll - event.y * 24)
+                    redraw()
+                    continue
+                if event.type == pygame.MOUSEWHEEL and screen == "game_options":
+                    inner_h = max(1, win_h - 200 - 32)
+                    content_h = len(_game_options_slider_defs()) * 54 + 24
+                    game_options_scroll = _clamp_panel_scroll(
+                        game_options_scroll - event.y * 24,
+                        content_h,
+                        inner_h,
+                    )
                     redraw()
                     continue
 
@@ -3023,6 +3250,7 @@ def run_movement_playtest(
                     splitter_drag = None
                     editor_paint_drag_active = False
                     last_editor_paint_coord = None
+                    game_options_drag_attr = None
 
                 if (
                     event.type == pygame.MOUSEMOTION
@@ -3050,6 +3278,23 @@ def run_movement_playtest(
                             min_map_viewport_w=GAMEPLAY_MIN_MAP_VIEWPORT_W,
                         )
                     apply_layout(win_w, win_h)
+                    redraw()
+                    continue
+
+                if (
+                    event.type == pygame.MOUSEMOTION
+                    and game_options_drag_attr is not None
+                    and screen == "game_options"
+                ):
+                    mx_m, _my_m = event.pos
+                    track = game_options_track_rects.get(game_options_drag_attr)
+                    if track is not None:
+                        for attr, _label, lo, hi in _game_options_slider_defs():
+                            if attr == game_options_drag_attr:
+                                _game_options_set_slider_from_mouse(
+                                    game_tuning, attr, mx_m, track, lo, hi
+                                )
+                                break
                     redraw()
                     continue
 
@@ -3290,10 +3535,10 @@ def run_movement_playtest(
                                     dragon_upgrade_overlay_active = False
                                     dragon_upgrade_overlay_baseline = None
                                     dragon_upgrade_overlay_click = None
-                                    dgn.begin_new_day_at_citadel(ccd)
+                                    dgn.begin_new_day_at_citadel(ccd, tuning=game_tuning)
                                     day_index += 1
                                     for ent in settlements_by_coord.values():
-                                        ent.on_settlement_phase_end()
+                                        ent.on_settlement_phase_end(tuning=game_tuning)
                                     active_armies, citadel_hp, phase_msgs, phase_over = (
                                         _run_end_of_day_army_phase(
                                             gmap,
@@ -3374,6 +3619,7 @@ def run_movement_playtest(
                                         world=gmap,
                                         citadel_coord=ccd,
                                         settlements_by_coord=settlements_by_coord,
+                                        armies_by_coord=_armies_by_coord(active_armies),
                                     )
                                     if result.ok and result.target_required:
                                         targeting_ability_name = ability_name
@@ -3408,6 +3654,7 @@ def run_movement_playtest(
                                 citadel_coord=ccd,
                                 settlements_by_coord=settlements_by_coord,
                                 target=picked_target,
+                                armies_by_coord=_armies_by_coord(active_armies),
                             )
                             inspector_message = result.reason
                             if result.ok:
@@ -3512,11 +3759,13 @@ def run_movement_playtest(
                                         target,
                                         list(settlements_by_coord.values()),
                                         map_width=gmap.width,
+                                        tuning=game_tuning,
                                     )
                                     spawned = _spawn_armies_from_events(
                                         list(spawn_events),
                                         settlements_by_coord=settlements_by_coord,
                                         active_armies=active_armies,
+                                        tuning=game_tuning,
                                     )
                                     dname = display_name_for_kind(dgn.kind)
                                     raid_overlay_banner = (
@@ -3600,13 +3849,37 @@ def run_movement_playtest(
                         redraw()
                         continue
 
-                    if screen == "settings":
-                        btn_creator = pygame.Rect(60, 130, 260, 40)
-                        btn_loader = pygame.Rect(60, 182, 260, 40)
-                        btn_editor = pygame.Rect(60, 234, 260, 40)
-                        btn_new_game = pygame.Rect(60, 286, 260, 40)
-                        btn_dev = pygame.Rect(60, 338, 260, 40)
+                    if screen == "game_options":
                         btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                        if btn_back.collidepoint(mx, my):
+                            screen = "settings"
+                            game_options_drag_attr = None
+                            redraw()
+                            continue
+                        for attr, _label, lo, hi in _game_options_slider_defs():
+                            tr = game_options_track_rects.get(attr)
+                            if tr is not None and tr.collidepoint(mx, my):
+                                game_options_drag_attr = attr
+                                _game_options_set_slider_from_mouse(
+                                    game_tuning, attr, mx, tr, lo, hi
+                                )
+                                redraw()
+                                break
+                        continue
+
+                    if screen == "settings":
+                        btn_game_opts = pygame.Rect(60, 130, 260, 40)
+                        btn_creator = pygame.Rect(60, 182, 260, 40)
+                        btn_loader = pygame.Rect(60, 234, 260, 40)
+                        btn_editor = pygame.Rect(60, 286, 260, 40)
+                        btn_new_game = pygame.Rect(60, 338, 260, 40)
+                        btn_dev = pygame.Rect(60, 390, 260, 40)
+                        btn_back = pygame.Rect(60, win_h - 70, 120, 36)
+                        if btn_game_opts.collidepoint(mx, my):
+                            screen = "game_options"
+                            game_options_drag_attr = None
+                            redraw()
+                            continue
                         if btn_creator.collidepoint(mx, my):
                             screen = "map_creator_setup"
                             focused_field = None

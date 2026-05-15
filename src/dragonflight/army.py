@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol, cast
 
 from .army_pathfinding import advance_along_path, army_sort_key
 from .citadel import CitadelState
@@ -10,10 +11,26 @@ from .dragon import DamageRoundExchange, Dragon, MoveAttempt
 from .hex_coord import OffsetCoord
 from .map_state import GameMap
 
+if TYPE_CHECKING:
+    from .game_tuning import GameTuning
+
 DEFAULT_ARMY_MOVEMENT_SPEED: int = 12
 ARMY_HP_PERCENT_OF_SETTLEMENT_MAX: int = 66
 ARMY_ATK_PERCENT_OF_SETTLEMENT_ATK: int = 90
 ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN: int = 50
+
+
+class _ArmySpawnSettlement(Protocol):
+    max_hp: int
+    atk: int
+    dfn: int
+    position: OffsetCoord
+
+
+class _StandaloneSpawnPayload(Protocol):
+    position: OffsetCoord
+    atk: int
+    dfn: int
 
 
 @dataclass(slots=True)
@@ -21,20 +38,31 @@ class Army:
     """Land army stack moving toward the citadel during the army phase."""
 
     hp: int
+    max_hp: int
     atk: int
     dfn: int
     movement_speed: int
     position: OffsetCoord
 
     @classmethod
-    def spawn_from_settlement(cls, settlement: object) -> Army:
+    def spawn_from_settlement(
+        cls,
+        settlement: _ArmySpawnSettlement,
+        *,
+        tuning: GameTuning | None = None,
+    ) -> Army:
         """Create an army using MVP spawn ratios (spec §9)."""
 
+        from .game_tuning import resolve_tuning
+
+        movement_speed = resolve_tuning(tuning).army_movement_speed
+        hp_val = settlement.max_hp * ARMY_HP_PERCENT_OF_SETTLEMENT_MAX // 100
         return cls(
-            hp=settlement.max_hp * ARMY_HP_PERCENT_OF_SETTLEMENT_MAX // 100,
+            hp=hp_val,
+            max_hp=hp_val,
             atk=settlement.atk * ARMY_ATK_PERCENT_OF_SETTLEMENT_ATK // 100,
             dfn=settlement.dfn * ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN // 100,
-            movement_speed=DEFAULT_ARMY_MOVEMENT_SPEED,
+            movement_speed=movement_speed,
             position=settlement.position,
         )
 
@@ -57,8 +85,8 @@ class ArmyPhaseResult:
 def merge_army_stacks(armies: list[Army]) -> list[Army]:
     """Collapse co-located armies into one stack per hex (spec §2, §9).
 
-    Combined HP/ATK/DFN use **sum**. ``movement_speed`` uses **max** so merged
-    stacks retain the fastest march rate among contributors.
+    Combined HP/``max_hp``/ATK/DFN use **sum**. ``movement_speed`` uses **max** so
+    merged stacks retain the fastest march rate among contributors.
     """
 
     by_position: dict[OffsetCoord, list[Army]] = {}
@@ -73,6 +101,7 @@ def merge_army_stacks(armies: list[Army]) -> list[Army]:
         merged.append(
             Army(
                 hp=sum(a.hp for a in group),
+                max_hp=sum(a.max_hp for a in group),
                 atk=sum(a.atk for a in group),
                 dfn=sum(a.dfn for a in group),
                 movement_speed=max(a.movement_speed for a in group),
@@ -82,22 +111,33 @@ def merge_army_stacks(armies: list[Army]) -> list[Army]:
     return merged
 
 
-def army_from_spawn_event(event: Army | object, settlement: object | None = None) -> Army:
+def army_from_spawn_event(
+    event: Army | object,
+    settlement: _ArmySpawnSettlement | None = None,
+    *,
+    tuning: GameTuning | None = None,
+) -> Army:
     """Bridge aggression spawns (``Army``) or legacy ``MockArmySpawnEvent`` for playtest."""
 
     if isinstance(event, Army):
         return event
     if settlement is not None:
-        return Army.spawn_from_settlement(settlement)
-    position = event.position
+        return Army.spawn_from_settlement(settlement, tuning=tuning)
+    orphan = cast(_StandaloneSpawnPayload, event)
+    position = orphan.position
     max_hp = 500
-    atk = int(event.atk)
-    dfn = int(event.dfn)
+    atk = int(orphan.atk)
+    dfn = int(orphan.dfn)
+    from .game_tuning import resolve_tuning
+
+    movement_speed = resolve_tuning(tuning).army_movement_speed
+    hp_val = max(1, max_hp * ARMY_HP_PERCENT_OF_SETTLEMENT_MAX // 100)
     return Army(
-        hp=max(1, max_hp * ARMY_HP_PERCENT_OF_SETTLEMENT_MAX // 100),
+        hp=hp_val,
+        max_hp=hp_val,
         atk=max(1, atk * ARMY_ATK_PERCENT_OF_SETTLEMENT_ATK // 100),
         dfn=max(0, dfn * ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN // 100),
-        movement_speed=DEFAULT_ARMY_MOVEMENT_SPEED,
+        movement_speed=movement_speed,
         position=position,
     )
 
@@ -192,14 +232,22 @@ def resolve_army_combat_round(
     if not budget.ok:
         return budget
 
+    from .dragon_abilities import (
+        apply_ice_talons_to_army,
+        enemy_defence_for_round,
+        on_combat_round_started,
+    )
+
+    on_combat_round_started(dragon)
     exchange = dragon.attack_army(
         army_hp=army.hp,
         army_atk=army.atk,
-        army_dfn=army.dfn,
+        army_dfn=enemy_defence_for_round(dragon, army.position, army.dfn),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):
         army.hp = exchange.target_hp_after
+        apply_ice_talons_to_army(dragon, army)
     return exchange
 
 

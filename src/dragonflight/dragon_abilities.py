@@ -36,7 +36,7 @@ MOUNTAINS_BOON_SPEED_BONUS: float = 2.0
 FIERY_MALICE_MULTIPLIER: float = 1.50
 DEFEND_THE_CITADEL_TRAVEL_DIVISOR: float = 3.0
 VIVIFY_HP_BONUS_PERCENT: int = 20
-VIVIFY_ATTACK_SACRIFICE_PERCENT: int = 20
+VIVIFY_ATTACK_SACRIFICE_PERCENT: int = 10
 VIVIFY_SACRIFICE_DURATION_HOURS: float = 5.0
 VIVIFY_SACRIFICE_EFFECT_NAME: str = "Vivify sacrifice"
 TREMORS_DEFENCE_MULTIPLIER: float = 0.85
@@ -160,6 +160,7 @@ def try_use_ability(
     citadel_coord: OffsetCoord,
     settlements_by_coord: Mapping[OffsetCoord, Settlement],
     target: OffsetCoord | None = None,
+    armies_by_coord: Mapping[OffsetCoord, object] | None = None,
 ) -> AbilityUseResult:
     """Validate and apply an active ability, mutating state only on success."""
 
@@ -180,7 +181,7 @@ def try_use_ability(
 
     if spec.name == "Plasma Lance":
         assert target is not None
-        result = _plasma_lance(dragon, world, settlements_by_coord, target)
+        result = _plasma_lance(dragon, world, settlements_by_coord, target, armies_by_coord)
     elif spec.name == "Fiery Malice":
         dragon.active_ability_hours[spec.name] = 3.0
         dragon.ability_extra_charges_today["Plasma Lance"] = (
@@ -190,10 +191,10 @@ def try_use_ability(
             True, "Fiery Malice active for 3 hours; +1 Plasma Lance today.", spec.name
         )
     elif spec.name == "Ancient's Roar":
-        affected = _ancients_roar(dragon, settlements_by_coord)
+        affected = _ancients_roar(dragon, settlements_by_coord, armies_by_coord)
         dragon.active_ability_hours[spec.name] = 12.0
         result = AbilityUseResult(
-            True, f"Ancient's Roar weakened {affected} settlement(s).", spec.name
+            True, f"Ancient's Roar weakened {affected} target(s).", spec.name
         )
     elif spec.name == "Defend the Citadel":
         result = _defend_the_citadel(dragon, citadel_coord)
@@ -232,10 +233,10 @@ def try_use_ability(
         )
     elif spec.name == "Tempest Strike":
         assert target is not None
-        result = _tempest_strike(dragon, world, settlements_by_coord, target)
+        result = _tempest_strike(dragon, world, settlements_by_coord, target, armies_by_coord)
     elif spec.name == "Absolute Zero Breath":
         assert target is not None
-        result = _absolute_zero_breath(dragon, world, settlements_by_coord, target)
+        result = _absolute_zero_breath(dragon, world, settlements_by_coord, target, armies_by_coord)
     elif spec.name == "Tremors":
         assert target is not None
         result = _tremors(dragon, world, target)
@@ -272,28 +273,48 @@ def _plasma_lance(
     world: GameMap,
     settlements_by_coord: Mapping[OffsetCoord, Settlement],
     target: OffsetCoord,
+    armies_by_coord: Mapping[OffsetCoord, object] | None,
 ) -> AbilityUseResult:
     invalid = _target_in_range(dragon, target, world)
     if invalid is not None:
         return AbilityUseResult(False, invalid.reason, "Plasma Lance")
     settlement = settlements_by_coord.get(target)
-    if settlement is None:
+    army = armies_by_coord.get(target) if armies_by_coord is not None else None
+    if settlement is None and army is None:
         return AbilityUseResult(True, "Plasma Lance scorched the empty tile.", "Plasma Lance")
     damage = max(1, effective_attack(dragon, world=world))
-    settlement.hp = max(0, settlement.hp - damage)
+    msg_parts: list[str] = []
+    if settlement is not None:
+        settlement.hp = max(0, settlement.hp - damage)
+        msg_parts.append("settlement")
+    if army is not None:
+        hp = int(getattr(army, "hp", 0))
+        setattr(army, "hp", max(0, hp - damage))
+        msg_parts.append("army")
+    label = " and ".join(msg_parts) if msg_parts else "target"
     return AbilityUseResult(
-        True, f"Plasma Lance dealt {damage} defence-ignoring damage.", "Plasma Lance"
+        True, f"Plasma Lance dealt {damage} defence-ignoring damage to {label}.", "Plasma Lance"
     )
 
 
 def _ancients_roar(
     dragon: Dragon,
     settlements_by_coord: Mapping[OffsetCoord, Settlement],
+    armies_by_coord: Mapping[OffsetCoord, object] | None,
 ) -> int:
     affected = 0
+    flight = effective_flight_range(dragon)
     for settlement in settlements_by_coord.values():
-        if dragon.hex_distance_to(settlement.position) <= effective_flight_range(dragon):
+        if dragon.hex_distance_to(settlement.position) <= flight:
             settlement.atk = max(0, int(math.floor(settlement.atk * 0.70)))
+            affected += 1
+    if armies_by_coord is not None:
+        for army in armies_by_coord.values():
+            pos = getattr(army, "position", None)
+            if pos is None or dragon.hex_distance_to(pos) > flight:
+                continue
+            atk = int(getattr(army, "atk", 0))
+            setattr(army, "atk", max(0, int(math.floor(atk * 0.70))))
             affected += 1
     return affected
 
@@ -325,24 +346,46 @@ def _tempest_strike(
     world: GameMap,
     settlements_by_coord: Mapping[OffsetCoord, Settlement],
     target: OffsetCoord,
+    armies_by_coord: Mapping[OffsetCoord, object] | None,
 ) -> AbilityUseResult:
     invalid = _target_in_range(dragon, target, world)
     if invalid is not None:
         return AbilityUseResult(False, invalid.reason, "Tempest Strike")
-    current = settlements_by_coord.get(target)
-    if current is None:
+    settlement_here = settlements_by_coord.get(target)
+    army_here = armies_by_coord.get(target) if armies_by_coord is not None else None
+    if settlement_here is None and army_here is None:
         return AbilityUseResult(True, "Tempest Strike hit an empty tile.", "Tempest Strike")
+
     hit: set[OffsetCoord] = set()
     damage = max(1, effective_attack(dragon, world=world))
     total = 0
+
+    current: Settlement | None = settlement_here
+    if current is None and army_here is not None:
+        hp = int(getattr(army_here, "hp", 0))
+        dfn = int(getattr(army_here, "dfn", 0))
+        setattr(army_here, "hp", max(0, hp - damage_dragon_attacks(damage, dfn)))
+        total += 1
+        hit.add(target)
+        damage //= 2
+        current = _nearest_unhit_settlement(target, settlements_by_coord, hit)
+
     while current is not None and damage > 0 and current.position not in hit:
+        pos = current.position
         current.hp = max(0, current.hp - damage_dragon_attacks(damage, current.dfn))
+        if armies_by_coord is not None:
+            a = armies_by_coord.get(pos)
+            if a is not None:
+                ahp = int(getattr(a, "hp", 0))
+                adfn = int(getattr(a, "dfn", 0))
+                setattr(a, "hp", max(0, ahp - damage_dragon_attacks(damage, adfn)))
         total += 1
         hit.add(current.position)
         damage //= 2
         current = _nearest_unhit_settlement(current.position, settlements_by_coord, hit)
+
     return AbilityUseResult(
-        True, f"Tempest Strike chained through {total} settlement(s).", "Tempest Strike"
+        True, f"Tempest Strike chained through {total} strike(s).", "Tempest Strike"
     )
 
 
@@ -368,17 +411,24 @@ def _absolute_zero_breath(
     world: GameMap,
     settlements_by_coord: Mapping[OffsetCoord, Settlement],
     target: OffsetCoord,
+    armies_by_coord: Mapping[OffsetCoord, object] | None,
 ) -> AbilityUseResult:
     invalid = _target_in_range(dragon, target, world)
     if invalid is not None:
         return AbilityUseResult(False, invalid.reason, "Absolute Zero Breath")
     settlement = settlements_by_coord.get(target)
-    if settlement is None:
+    army = armies_by_coord.get(target) if armies_by_coord is not None else None
+    if settlement is None and army is None:
         return AbilityUseResult(
             True, "Absolute Zero Breath froze an empty line.", "Absolute Zero Breath"
         )
     damage = max(1, int(round(effective_attack(dragon, world=world) * 1.5)))
-    settlement.hp = max(0, settlement.hp - damage_dragon_attacks(damage, settlement.dfn))
+    if settlement is not None:
+        settlement.hp = max(0, settlement.hp - damage_dragon_attacks(damage, settlement.dfn))
+    if army is not None:
+        ahp = int(getattr(army, "hp", 0))
+        adfn = int(getattr(army, "dfn", 0))
+        setattr(army, "hp", max(0, ahp - damage_dragon_attacks(damage, adfn)))
     _append_unique_coord(dragon.marked_ability_tiles, "Absolute Zero no heal", target)
     return AbilityUseResult(
         True, f"Absolute Zero Breath hit for {damage} attack power.", "Absolute Zero Breath"
@@ -467,13 +517,17 @@ def _set_or_clear_effect(dragon: Dragon, name: str, hours: float) -> None:
         dragon.active_ability_hours[name] = hours
 
 
-def on_settlement_combat_started(dragon: Dragon) -> None:
+def on_combat_round_started(dragon: Dragon) -> None:
     if passive_active(dragon, "Flame buffer"):
         dragon.passive_stacks.setdefault("Flame buffer", 0)
 
 
+def on_settlement_combat_started(dragon: Dragon) -> None:
+    on_combat_round_started(dragon)
+
+
 def on_combat_ended(dragon: Dragon) -> None:
-    del dragon
+    pass
 
 
 def effective_attack(dragon: Dragon, *, world: GameMap | None = None) -> int:
@@ -528,12 +582,33 @@ def _mountain_nearby(dragon: Dragon, world: GameMap) -> bool:
     return False
 
 
-def outgoing_settlement_damage_multiplier(dragon: Dragon) -> float:
+def outgoing_combat_damage_multiplier(dragon: Dragon) -> float:
     if not passive_active(dragon, "Flame buffer"):
         return 1.0
     stacks = min(FLAME_BUFFER_MAX_STACKS, dragon.passive_stacks.get("Flame buffer", 0) + 1)
     dragon.passive_stacks["Flame buffer"] = stacks
     return 1.0 + (stacks * FLAME_BUFFER_STACK_PERCENT / 100.0)
+
+
+outgoing_settlement_damage_multiplier = outgoing_combat_damage_multiplier
+
+
+def preview_flame_buffer_damage_multiplier(dragon: Dragon) -> float:
+    """Flame buffer multiplier for the next combat round without mutating stacks (GUI)."""
+
+    if not passive_active(dragon, "Flame buffer"):
+        return 1.0
+    stacks = min(FLAME_BUFFER_MAX_STACKS, dragon.passive_stacks.get("Flame buffer", 0) + 1)
+    return 1.0 + (stacks * FLAME_BUFFER_STACK_PERCENT / 100.0)
+
+
+def preview_vivify_attack_power_bonus(dragon: Dragon) -> int:
+    """Hypothetical ATK from Vivify sacrifice without spending HP (GUI preview)."""
+
+    if active_effect_hours_remaining(dragon, VIVIFY_SACRIFICE_EFFECT_NAME) <= 0:
+        return 0
+    sacrifice = dragon.hp * VIVIFY_ATTACK_SACRIFICE_PERCENT // 100
+    return max(0, sacrifice * 2)
 
 
 def thorns_damage(dragon: Dragon, incoming_damage: int) -> int:
@@ -560,7 +635,7 @@ def vivify_attack_bonus(dragon: Dragon) -> int:
     if sacrifice <= 0:
         return 0
     dragon.hp = max(1, dragon.hp - sacrifice)
-    return sacrifice
+    return sacrifice * 2
 
 
 def apply_ice_talons_to_settlement(dragon: Dragon, settlement: Settlement) -> None:
@@ -570,10 +645,24 @@ def apply_ice_talons_to_settlement(dragon: Dragon, settlement: Settlement) -> No
         )
 
 
+def apply_ice_talons_to_army(dragon: Dragon, army: object) -> None:
+    if passive_active(dragon, "Ice Talons"):
+        atk = int(getattr(army, "atk", 0))
+        setattr(
+            army,
+            "atk",
+            max(0, int(math.floor(atk * (1.0 - ICE_TALONS_ATTACK_REDUCTION_PERCENT / 100.0)))),
+        )
+
+
+def enemy_defence_for_round(dragon: Dragon, position: OffsetCoord, base_dfn: int) -> int:
+    if position in dragon.marked_ability_tiles.get("Tremors", ()):
+        return max(0, int(math.floor(base_dfn * TREMORS_DEFENCE_MULTIPLIER)))
+    return base_dfn
+
+
 def settlement_defence_for_round(dragon: Dragon, settlement: Settlement) -> int:
-    if settlement.position in dragon.marked_ability_tiles.get("Tremors", ()):
-        return max(0, int(math.floor(settlement.dfn * TREMORS_DEFENCE_MULTIPLIER)))
-    return settlement.dfn
+    return enemy_defence_for_round(dragon, settlement.position, settlement.dfn)
 
 
 def ability_status_label(dragon: Dragon, ability_name: str) -> str:
@@ -612,7 +701,7 @@ def ability_ui_detail_lines(
         return [
             f"Stacks today: {stacks}/{FLAME_BUFFER_MAX_STACKS}",
             f"Current damage bonus: +{percent}%",
-            f"Adds +{FLAME_BUFFER_STACK_PERCENT}% per settlement combat round.",
+            f"Adds +{FLAME_BUFFER_STACK_PERCENT}% per combat round (settlements and armies).",
         ]
     if spec.name == "Spiked Scales":
         damage = max(1, dragon.dfn * SPIKED_SCALES_DEFENCE_PERCENT // 100)
@@ -629,7 +718,10 @@ def ability_ui_detail_lines(
     if spec.name == "Foresight":
         return [f"Mitigates {FORESIGHT_DAMAGE_UNDO_PERCENT}% damage after each combat round."]
     if spec.name == "Ice Talons":
-        return [f"Settlement attack reduced {ICE_TALONS_ATTACK_REDUCTION_PERCENT}% per hit."]
+        return [
+            "Enemy attack reduced "
+            f"{ICE_TALONS_ATTACK_REDUCTION_PERCENT}% per hit (settlements and armies).",
+        ]
     if spec.name == "Mountain's Boon":
         active = world is not None and _mountain_nearby(dragon, world)
         attack_bonus = int(round((MOUNTAINS_BOON_ATTACK_MULTIPLIER - 1.0) * 100))
@@ -653,8 +745,8 @@ def ability_ui_detail_lines(
     if spec.name == "Ancient's Roar":
         return [
             f"Range: {effective_flight_range(dragon)} hexes.",
-            "Settlements in range: -30% attack.",
-            "Army move slow hook TODO.",
+            "Targets in range: -30% attack (settlements and armies).",
+            "Chrono-conic army slow TODO.",
         ]
     if spec.name == "Defend the Citadel":
         percent = int(round((FIERY_MALICE_MULTIPLIER - 1.0) * 100))
@@ -670,11 +762,12 @@ def ability_ui_detail_lines(
         base_max_hp = max(1, dragon.max_hp - active_bonus)
         next_bonus = max(1, base_max_hp * VIVIFY_HP_BONUS_PERCENT // 100)
         sacrifice = dragon.hp * VIVIFY_ATTACK_SACRIFICE_PERCENT // 100
+        power = sacrifice * 2
         sacrifice_hours = active_effect_hours_remaining(dragon, VIVIFY_SACRIFICE_EFFECT_NAME)
         return [
             f"+{active_bonus or next_bonus} max HP until next day.",
             f"Sacrifice window: {sacrifice_hours:.1f}h / {VIVIFY_SACRIFICE_DURATION_HOURS:g}h.",
-            f"Attack sacrifice preview: {sacrifice} HP.",
+            f"Sacrifice preview: {sacrifice} HP for +{power} attack power (2× rule).",
         ]
     if spec.name == "Timestop":
         return ["Next 1h of actions costs no time.", "Enemies cannot retaliate while active."]
@@ -690,7 +783,7 @@ def ability_ui_detail_lines(
         return [f"Attack power: {damage}.", "No-heal marker hook TODO."]
     if spec.name == "Tremors":
         penalty = int(round((1.0 - TREMORS_DEFENCE_MULTIPLIER) * 100))
-        return [f"Marks one tile: -{penalty}% settlement DFN in combat."]
+        return [f"Marks one tile: -{penalty}% enemy DFN in combat (settlements and armies)."]
     if spec.name == "Terrascape":
         return ["Raises simulated mountain marker.", "Permanent map mutation TODO."]
     return [spec.description]
@@ -703,6 +796,7 @@ __all__ = [
     "ability_status_label",
     "ability_ui_detail_lines",
     "ability_spec_by_name",
+    "apply_ice_talons_to_army",
     "apply_ice_talons_to_settlement",
     "apply_time_spent",
     "begin_new_turn",
@@ -713,11 +807,16 @@ __all__ = [
     "effective_flight_range",
     "effective_speed_hexes_per_hour",
     "enemy_can_retaliate",
+    "enemy_defence_for_round",
     "mitigated_damage_taken",
     "on_combat_ended",
+    "on_combat_round_started",
     "on_settlement_combat_started",
+    "outgoing_combat_damage_multiplier",
     "outgoing_settlement_damage_multiplier",
     "passive_active",
+    "preview_flame_buffer_damage_multiplier",
+    "preview_vivify_attack_power_bonus",
     "settlement_defence_for_round",
     "synchronize_unlocked_abilities",
     "thorns_damage",
