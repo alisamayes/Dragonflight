@@ -32,7 +32,7 @@ from collections.abc import Callable
 
 import pygame
 
-from .hex_coord import HEX_CORNERS, hex_corner_offset, offset_to_pixel
+from .hex_coord import HEX_CORNERS, OffsetCoord, hex_corner_offset, offset_to_pixel
 from .map_state import GameMap, Tile
 from .settlement import SettlementType
 from .terrain import Terrain
@@ -113,6 +113,18 @@ _SQRT3: float = math.sqrt(3.0)
 
 
 # --- Internal sizing helpers ------------------------------------------------
+
+
+def _hex_polygon_points(
+    coord: tuple[float, float],
+    hex_size: float,
+) -> list[tuple[float, float]]:
+    """Return polygon points for a flat-top hex at centre ``coord``."""
+    cx, cy = coord
+    return [
+        (cx + dx, cy + dy)
+        for dx, dy in (hex_corner_offset(hex_size, i) for i in range(HEX_CORNERS))
+    ]
 
 
 def _offset_extent(game_map: GameMap) -> tuple[int, int, int, int]:
@@ -323,13 +335,26 @@ def render_map(
         cx_off, cy_off = offset_to_pixel(tile.coord, hex_size)
         cx = origin_x + cx_off
         cy = origin_y + cy_off
-        polygon = [
-            (cx + dx, cy + dy)
-            for dx, dy in (hex_corner_offset(hex_size, i) for i in range(HEX_CORNERS))
-        ]
+        polygon = _hex_polygon_points((cx, cy), hex_size)
         fill = default_tile_fill_rgb(tile) if tile_color is None else tile_color(tile)
         pygame.draw.polygon(surface, fill, polygon)
         pygame.draw.polygon(surface, HEX_OUTLINE_COLOR, polygon, width=HEX_OUTLINE_WIDTH)
+
+
+def draw_hex_outline(
+    surface: pygame.Surface,
+    *,
+    coord: OffsetCoord,
+    hex_size: float,
+    origin: tuple[float, float],
+    rgb: tuple[int, int, int],
+    width: int = 2,
+) -> None:
+    """Draw a polygon outline around one offset hex coordinate."""
+    origin_x, origin_y = origin
+    cx_off, cy_off = offset_to_pixel(coord, hex_size)
+    polygon = _hex_polygon_points((origin_x + cx_off, origin_y + cy_off), hex_size)
+    pygame.draw.polygon(surface, rgb, polygon, width=width)
 
 
 def run_demo(game_map: GameMap, *, window_title: str = "Dragonflight — map preview") -> None:

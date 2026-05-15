@@ -11,7 +11,10 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 import pytest
 
+from dragonflight.hex_coord import OffsetCoord
+from dragonflight.map_state import GameMap, Tile
 from dragonflight.movement_playtest import (
+    _DEFAULT_HEX_SIZE_HINT,
     GAMEPLAY_MIN_MAP_VIEWPORT_H,
     GAMEPLAY_MIN_MAP_VIEWPORT_W,
     GAMEPLAY_PANEL_SPLITTER_HIT_HALFWIDTH,
@@ -21,13 +24,19 @@ from dragonflight.movement_playtest import (
     SETTINGS_BAR_HEIGHT,
     TIME_BAR_HEIGHT,
     _clamp_panel_scroll,
+    _dragon_screen_center,
+    _editor_try_paint_at_pixel,
     _inspector_panel_raw_min_column_width,
     _map_viewport_rect,
+    _MapEditorState,
     _min_dragon_panel_column_width,
     _min_inspector_panel_column_width,
     clamp_gameplay_side_panel_widths,
     hit_test_gameplay_panel_splitter,
 )
+from dragonflight.render import layout_map_on_canvas
+from dragonflight.settlement import SettlementType
+from dragonflight.terrain import Terrain
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -186,3 +195,113 @@ def test_clamp_panel_scroll_bounds() -> None:
 def test_gameplay_floor_constants_sane() -> None:
     assert GAMEPLAY_MIN_MAP_VIEWPORT_W >= 64
     assert GAMEPLAY_MIN_MAP_VIEWPORT_H >= 64
+
+
+def _editor_hex_center_pixel(
+    editor: _MapEditorState, map_view: pygame.Rect, coord: OffsetCoord
+) -> tuple[float, float]:
+    paint_tiles: dict[OffsetCoord, Tile] = {}
+    for c in editor.tiles:
+        cell = editor.tiles.get(c)
+        cell_terrain = Terrain.GRASSLAND if cell is None else cell
+        sk = (
+            editor.settlement_kinds.get(c, SettlementType.VILLAGE)
+            if cell_terrain is Terrain.SETTLEMENT
+            else None
+        )
+        paint_tiles[c] = Tile(coord=c, terrain=cell_terrain, settlement_kind=sk)
+    edit_map = GameMap(
+        width=editor.width,
+        height=editor.height,
+        hex_size=float(_DEFAULT_HEX_SIZE_HINT),
+        orientation="flat",
+        tiles=paint_tiles,
+    )
+    hs, (ox, oy), _ = layout_map_on_canvas(edit_map, map_view.w, map_view.h)
+    origin_edit = (ox + float(map_view.x), oy + float(map_view.y))
+    return _dragon_screen_center(coord, hs, origin_edit)
+
+
+def test_editor_try_paint_at_pixel_terrain() -> None:
+    coord = OffsetCoord(col=0, row=0)
+    editor = _MapEditorState(
+        width=1,
+        height=1,
+        name="t",
+        map_id="id",
+        created_at="z",
+        selected=Terrain.MOUNTAIN,
+        tiles={coord: Terrain.GRASSLAND},
+    )
+    mv = pygame.Rect(0, 0, 480, 480)
+    cx, cy = _editor_hex_center_pixel(editor, mv, coord)
+    changed, picked = _editor_try_paint_at_pixel(editor, cx, cy, mv)
+    assert changed is True
+    assert picked == coord
+    assert editor.tiles[coord] is Terrain.MOUNTAIN
+
+
+def test_editor_try_paint_at_pixel_skips_same_hex_when_dragging() -> None:
+    coord = OffsetCoord(col=0, row=0)
+    editor = _MapEditorState(
+        width=1,
+        height=1,
+        name="t",
+        map_id="id",
+        created_at="z",
+        selected=Terrain.MOUNTAIN,
+        tiles={coord: Terrain.GRASSLAND},
+    )
+    mv = pygame.Rect(0, 0, 480, 480)
+    cx, cy = _editor_hex_center_pixel(editor, mv, coord)
+    _editor_try_paint_at_pixel(editor, cx, cy, mv)
+    changed_again, picked_again = _editor_try_paint_at_pixel(
+        editor, cx, cy, mv, skip_if_same_as=coord
+    )
+    assert changed_again is False
+    assert picked_again == coord
+    assert editor.tiles[coord] is Terrain.MOUNTAIN
+
+
+def test_editor_try_paint_at_pixel_settlement_brush_status_on_non_settlement() -> None:
+    coord = OffsetCoord(col=0, row=0)
+    editor = _MapEditorState(
+        width=1,
+        height=1,
+        name="t",
+        map_id="id",
+        created_at="z",
+        selected=Terrain.GRASSLAND,
+        tiles={coord: Terrain.GRASSLAND},
+        brush="settlement",
+        selected_settlement_kind=SettlementType.CITY,
+    )
+    mv = pygame.Rect(0, 0, 480, 480)
+    cx, cy = _editor_hex_center_pixel(editor, mv, coord)
+    changed, picked = _editor_try_paint_at_pixel(editor, cx, cy, mv)
+    assert changed is True
+    assert picked == coord
+    assert editor.tiles[coord] is Terrain.GRASSLAND
+    assert "settlement" in editor.status.lower()
+
+
+def test_editor_try_paint_at_pixel_settlement_brush_updates_kind() -> None:
+    coord = OffsetCoord(col=0, row=0)
+    editor = _MapEditorState(
+        width=1,
+        height=1,
+        name="t",
+        map_id="id",
+        created_at="z",
+        selected=Terrain.GRASSLAND,
+        tiles={coord: Terrain.SETTLEMENT},
+        settlement_kinds={coord: SettlementType.VILLAGE},
+        brush="settlement",
+        selected_settlement_kind=SettlementType.FORT,
+    )
+    mv = pygame.Rect(0, 0, 480, 480)
+    cx, cy = _editor_hex_center_pixel(editor, mv, coord)
+    changed, picked = _editor_try_paint_at_pixel(editor, cx, cy, mv)
+    assert changed is True
+    assert picked == coord
+    assert editor.settlement_kinds[coord] is SettlementType.FORT

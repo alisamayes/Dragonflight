@@ -24,7 +24,6 @@ from typing import Any, Literal
 import pygame
 
 from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
-from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
 from .dragon_abilities import (
     ability_button_enabled,
     ability_requires_target,
@@ -38,6 +37,7 @@ from .dragon_abilities import (
     try_use_ability,
     unlocked_ability_specs,
 )
+from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
 from .dragon_defaults import HOURS_PER_DRAGON_DAY
 from .dragon_playables import (
     default_playable_kind,
@@ -57,6 +57,7 @@ from .dragon_progression import (
     preview_dragon_stats_after_draft,
     total_dragon_upgrade_draft_cost,
 )
+from .dragon_ui_theme import DragonUITheme, dragon_ui_theme_for_kind
 from .hex_coord import HEX_CORNERS, OffsetCoord, offset_to_pixel
 from .hour_bar_layout import hour_bar_segment_layout
 from .map_loader import MapLoadError, load_map
@@ -72,6 +73,7 @@ from .render import (
     compute_render_hex_size,
     compute_window_size,
     default_tile_fill_rgb,
+    draw_hex_outline,
     hex_corner_offset,
     layout_map_on_canvas,
     render_map,
@@ -346,16 +348,33 @@ def _draw_button(
     *,
     hovered: bool = False,
     active: bool = False,
+    border_rgb: tuple[int, int, int] = _UI_BORDER_RGB,
 ) -> None:
     fill = (
         _UI_BUTTON_ACTIVE_RGB if active else (_UI_BUTTON_HOVER_RGB if hovered else _UI_BUTTON_RGB)
     )
     pygame.draw.rect(surface, fill, rect, border_radius=6)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, rect, width=1, border_radius=6)
+    pygame.draw.rect(surface, border_rgb, rect, width=1, border_radius=6)
     text_surf = font.render(label, True, _UI_TEXT_RGB)
     tx = rect.x + (rect.w - text_surf.get_width()) // 2
     ty = rect.y + (rect.h - text_surf.get_height()) // 2
     surface.blit(text_surf, (tx, ty))
+
+
+def _draw_info_panel_chrome(
+    surface: pygame.Surface,
+    panel_rect: pygame.Rect,
+    *,
+    theme: DragonUITheme,
+    stripe_edge: Literal["left", "right"],
+) -> None:
+    """Paint panel fill + pale border + thin dragon-accent edge stripe."""
+    pygame.draw.rect(surface, theme.panel_tint_rgb, panel_rect)
+    pygame.draw.rect(surface, theme.border_rgb, panel_rect, width=1)
+    stripe_w = 4
+    stripe_x = panel_rect.left if stripe_edge == "left" else panel_rect.right - stripe_w
+    stripe = pygame.Rect(stripe_x, panel_rect.top, stripe_w, panel_rect.height)
+    pygame.draw.rect(surface, theme.accent_rgb, stripe)
 
 
 def _wrap_text_to_width(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
@@ -435,13 +454,14 @@ def _draw_panel_scrollbar(
     scroll_y: int,
     content_height: int,
     pad: int = 12,
+    border_rgb: tuple[int, int, int] = _UI_BORDER_RGB,
 ) -> None:
     viewport_h = max(1, panel_rect.h - 2 * pad)
     max_scroll = max(0, content_height - viewport_h)
     if max_scroll <= 0:
         return
     track = pygame.Rect(panel_rect.right - 7, panel_rect.y + pad, 4, viewport_h)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, track, border_radius=2)
+    pygame.draw.rect(surface, border_rgb, track, border_radius=2)
     thumb_h = max(24, int(viewport_h * viewport_h / max(content_height, 1)))
     thumb_y = panel_rect.y + pad + int((viewport_h - thumb_h) * scroll_y / max_scroll)
     thumb = pygame.Rect(track.x, thumb_y, track.w, thumb_h)
@@ -691,6 +711,63 @@ def _pick_tile_at_pixel(
         if _point_in_polygon(px, py, poly):
             return tile.coord
     return None
+
+
+def _editor_try_paint_at_pixel(
+    editor: _MapEditorState,
+    mx: float,
+    my: float,
+    map_view: pygame.Rect,
+    *,
+    skip_if_same_as: OffsetCoord | None = None,
+) -> tuple[bool, OffsetCoord | None]:
+    """Pick the hex under ``(mx, my)`` and apply the current brush.
+
+    If ``skip_if_same_as`` equals the picked coordinate, returns ``(False, picked)``
+    without mutating the editor (skips duplicate hexes while LMB-drag painting).
+
+    Returns ``(needs_redraw, picked_coord)`` where ``needs_redraw`` is true when
+    terrain/settlement state or editor status changed.
+    """
+
+    paint_tiles: dict[OffsetCoord, Tile] = {}
+    for coord in editor.tiles:
+        cell = editor.tiles.get(coord)
+        cell_terrain = Terrain.GRASSLAND if cell is None else cell
+        sk = (
+            editor.settlement_kinds.get(coord, SettlementType.VILLAGE)
+            if cell_terrain is Terrain.SETTLEMENT
+            else None
+        )
+        paint_tiles[coord] = Tile(coord=coord, terrain=cell_terrain, settlement_kind=sk)
+    edit_map = GameMap(
+        width=editor.width,
+        height=editor.height,
+        hex_size=float(_DEFAULT_HEX_SIZE_HINT),
+        orientation="flat",
+        tiles=paint_tiles,
+    )
+    hs, (ox, oy), _ = layout_map_on_canvas(edit_map, map_view.w, map_view.h)
+    origin_edit = (ox + float(map_view.x), oy + float(map_view.y))
+    picked = _pick_tile_at_pixel(float(mx), float(my), edit_map, hs, origin_edit)
+    if picked is None:
+        return False, None
+    if skip_if_same_as is not None and picked == skip_if_same_as:
+        return False, picked
+
+    if editor.brush == "terrain":
+        editor.tiles[picked] = editor.selected
+        if editor.selected is Terrain.SETTLEMENT:
+            editor.settlement_kinds[picked] = editor.selected_settlement_kind
+        else:
+            editor.settlement_kinds.pop(picked, None)
+        editor.status = ""
+    elif editor.tiles.get(picked) is Terrain.SETTLEMENT:
+        editor.settlement_kinds[picked] = editor.selected_settlement_kind
+        editor.status = ""
+    else:
+        editor.status = "Select a settlement hex first."
+    return True, picked
 
 
 def _dragon_screen_center(
@@ -964,14 +1041,14 @@ def _draw_dragon_panel(
     font_small: pygame.font.Font,
     *,
     panel_rect: pygame.Rect,
+    theme: DragonUITheme,
     dragon: Dragon,
     world: GameMap,
     scroll_y: int = 0,
 ) -> tuple[dict[str, pygame.Rect], int]:
     """Left column: dragon identity, level, combat/move stats, and unlocked abilities."""
 
-    pygame.draw.rect(surface, _UI_PANEL_RGB, panel_rect)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, panel_rect, width=1)
+    _draw_info_panel_chrome(surface, panel_rect, theme=theme, stripe_edge="left")
 
     layout = _ScrollPanelLayout(panel_rect=panel_rect, scroll_y=scroll_y)
     layout.begin(surface)
@@ -1035,9 +1112,7 @@ def _draw_dragon_panel(
 
     layout.advance(6)
     if layout.is_visible(line_h_small):
-        _draw_text(
-            surface, font_small, "Combat Stats", (layout.x, layout.screen_y()), _UI_TEXT_RGB
-        )
+        _draw_text(surface, font_small, "Combat Stats", (layout.x, layout.screen_y()), _UI_TEXT_RGB)
     layout.advance(line_gap)
     combat_atk = effective_attack(dragon, world=world)
     combat_dfn = effective_defence(dragon)
@@ -1144,6 +1219,7 @@ def _draw_raid_combat_overlay(
     font: pygame.font.Font,
     font_small: pygame.font.Font,
     *,
+    theme: DragonUITheme,
     map_viewport: pygame.Rect,
     dragon: Dragon,
     settlement: Settlement,
@@ -1157,7 +1233,7 @@ def _draw_raid_combat_overlay(
     shade = pygame.Surface((overlay.w, overlay.h), pygame.SRCALPHA)
     shade.fill((24, 26, 34, 236))
     surface.blit(shade, overlay.topleft)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, overlay, width=1)
+    pygame.draw.rect(surface, theme.border_rgb, overlay, width=1)
 
     inner_pad = 14
     cx = overlay.x + inner_pad
@@ -1208,8 +1284,22 @@ def _draw_raid_combat_overlay(
     attack_rect = pygame.Rect(cx, btn_y, btn_w, 36)
     retreat_rect = pygame.Rect(cx + btn_w + inner_pad, btn_y, btn_w, 36)
     mx, my = pygame.mouse.get_pos()
-    _draw_button(surface, font, attack_rect, "Attack", hovered=attack_rect.collidepoint(mx, my))
-    _draw_button(surface, font, retreat_rect, "Retreat", hovered=retreat_rect.collidepoint(mx, my))
+    _draw_button(
+        surface,
+        font,
+        attack_rect,
+        "Attack",
+        hovered=attack_rect.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
+    _draw_button(
+        surface,
+        font,
+        retreat_rect,
+        "Retreat",
+        hovered=retreat_rect.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
     return attack_rect, retreat_rect
 
 
@@ -1218,6 +1308,7 @@ def _draw_army_combat_overlay(
     font: pygame.font.Font,
     font_small: pygame.font.Font,
     *,
+    theme: DragonUITheme,
     map_viewport: pygame.Rect,
     dragon: Dragon,
     army: Any,
@@ -1231,7 +1322,7 @@ def _draw_army_combat_overlay(
     shade = pygame.Surface((overlay.w, overlay.h), pygame.SRCALPHA)
     shade.fill((24, 26, 34, 236))
     surface.blit(shade, overlay.topleft)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, overlay, width=1)
+    pygame.draw.rect(surface, theme.border_rgb, overlay, width=1)
 
     inner_pad = 14
     cx = overlay.x + inner_pad
@@ -1283,8 +1374,22 @@ def _draw_army_combat_overlay(
     attack_rect = pygame.Rect(cx, btn_y, btn_w, 36)
     retreat_rect = pygame.Rect(cx + btn_w + inner_pad, btn_y, btn_w, 36)
     mx, my = pygame.mouse.get_pos()
-    _draw_button(surface, font, attack_rect, "Attack", hovered=attack_rect.collidepoint(mx, my))
-    _draw_button(surface, font, retreat_rect, "Retreat", hovered=retreat_rect.collidepoint(mx, my))
+    _draw_button(
+        surface,
+        font,
+        attack_rect,
+        "Attack",
+        hovered=attack_rect.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
+    _draw_button(
+        surface,
+        font,
+        retreat_rect,
+        "Retreat",
+        hovered=retreat_rect.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
     return attack_rect, retreat_rect
 
 
@@ -1405,9 +1510,10 @@ def _draw_dragon_upgrade_stat_pill(
     *,
     title: str,
     value: str,
+    border_rgb: tuple[int, int, int] = _UI_BORDER_RGB,
 ) -> None:
     pygame.draw.rect(surface, _UI_BUTTON_RGB, rect, border_radius=6)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, rect, width=1, border_radius=6)
+    pygame.draw.rect(surface, border_rgb, rect, width=1, border_radius=6)
     title_surf = font.render(title, True, _UI_MUTED_TEXT_RGB)
     value_surf = font.render(value, True, _UI_TEXT_RGB)
     line_gap = 2
@@ -1433,14 +1539,15 @@ def _draw_dragon_upgrade_cost_tile(
     label: str,
     *,
     enabled: bool,
+    border_rgb: tuple[int, int, int] = _UI_BORDER_RGB,
 ) -> None:
     mx, my = pygame.mouse.get_pos()
     hovered = enabled and rect.collidepoint(mx, my)
     if enabled:
-        _draw_button(surface, font, rect, label, hovered=hovered)
+        _draw_button(surface, font, rect, label, hovered=hovered, border_rgb=border_rgb)
     else:
         pygame.draw.rect(surface, _UI_INPUT_RGB, rect, border_radius=6)
-        pygame.draw.rect(surface, _UI_BORDER_RGB, rect, width=1, border_radius=6)
+        pygame.draw.rect(surface, border_rgb, rect, width=1, border_radius=6)
         surf = font.render(label, True, _UI_MUTED_TEXT_RGB)
         surface.blit(
             surf,
@@ -1451,6 +1558,7 @@ def _draw_dragon_upgrade_cost_tile(
 def _draw_dragon_upgrade_overlay(
     surface: pygame.Surface,
     *,
+    theme: DragonUITheme,
     client_w: int,
     client_h: int,
     font_mid: pygame.font.Font,
@@ -1466,8 +1574,8 @@ def _draw_dragon_upgrade_overlay(
     surface.blit(dim, (0, 0))
 
     layout = dragon_upgrade_overlay_layout(client_w, client_h)
-    pygame.draw.rect(surface, _UI_PANEL_RGB, layout.panel)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, layout.panel, width=1)
+    pygame.draw.rect(surface, theme.panel_tint_rgb, layout.panel)
+    pygame.draw.rect(surface, theme.border_rgb, layout.panel, width=1)
 
     _draw_text(surface, font_mid, "Draconic Upgrades", layout.title_pos, _UI_TEXT_RGB)
 
@@ -1503,7 +1611,12 @@ def _draw_dragon_upgrade_overlay(
         r_cur, r_prv, r_cost = layout.columns[i]
         stat_title = _DRAGON_UPGRADE_STAT_LABELS[stat]
         _draw_dragon_upgrade_stat_pill(
-            surface, font_small, r_cur, title=stat_title, value=cur_pills[i]
+            surface,
+            font_small,
+            r_cur,
+            title=stat_title,
+            value=cur_pills[i],
+            border_rgb=theme.border_rgb,
         )
         marginal = marginal_dragon_stat_upgrade_cost(baseline, draft, stat)
         draft_if = list(draft) + [stat]
@@ -1515,6 +1628,7 @@ def _draw_dragon_upgrade_overlay(
             r_cost,
             f"{marginal} g",
             enabled=can_add,
+            border_rgb=theme.border_rgb,
         )
         cost_rects[stat] = r_cost
 
@@ -1523,7 +1637,12 @@ def _draw_dragon_upgrade_overlay(
         _, r_prv, _ = layout.columns[i]
         stat_title = _DRAGON_UPGRADE_STAT_LABELS[stat]
         _draw_dragon_upgrade_stat_pill(
-            surface, font_small, r_prv, title=stat_title, value=prv_pills[i]
+            surface,
+            font_small,
+            r_prv,
+            title=stat_title,
+            value=prv_pills[i],
+            border_rgb=theme.border_rgb,
         )
 
     surface.blit(prv_surf, layout.preview_line_pos)
@@ -1536,6 +1655,7 @@ def _draw_dragon_upgrade_overlay(
         layout.reset_btn,
         "Reset",
         hovered=layout.reset_btn.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
     )
     if can_next_day:
         _draw_button(
@@ -1544,6 +1664,7 @@ def _draw_dragon_upgrade_overlay(
             layout.next_day_btn,
             "Next day",
             hovered=layout.next_day_btn.collidepoint(mx, my),
+            border_rgb=theme.border_rgb,
         )
     else:
         _draw_dragon_upgrade_cost_tile(
@@ -1552,6 +1673,7 @@ def _draw_dragon_upgrade_overlay(
             layout.next_day_btn,
             "Next day",
             enabled=False,
+            border_rgb=theme.border_rgb,
         )
 
     return DragonUpgradeOverlayClickRects(
@@ -1567,6 +1689,7 @@ def _draw_tile_inspector_panel(
     font_small: pygame.font.Font,
     *,
     panel_rect: pygame.Rect,
+    theme: DragonUITheme,
     game_map: GameMap,
     settlements_by_coord: dict[OffsetCoord, Settlement],
     armies_by_coord: dict[OffsetCoord, Any],
@@ -1581,8 +1704,7 @@ def _draw_tile_inspector_panel(
 ) -> tuple[pygame.Rect | None, pygame.Rect | None, int]:
     """Paint tile details; returns optional (raid_rect, attack_army_rect) and content height."""
 
-    pygame.draw.rect(surface, _UI_PANEL_RGB, panel_rect)
-    pygame.draw.rect(surface, _UI_BORDER_RGB, panel_rect, width=1)
+    _draw_info_panel_chrome(surface, panel_rect, theme=theme, stripe_edge="right")
 
     layout = _ScrollPanelLayout(panel_rect=panel_rect, scroll_y=scroll_y)
     layout.begin(surface)
@@ -1758,8 +1880,14 @@ def _draw_tile_inspector_panel(
     return raid_click_rect, army_attack_click_rect, layout.content_height_total()
 
 
-def _draw_hour_bar(surface: pygame.Surface, hours_remaining: float, bar_width: int) -> None:
-    """Draw 24 equal hour segments; left-to-right shows **spent** (dark) then **left** (green)."""
+def _draw_hour_bar(
+    surface: pygame.Surface,
+    hours_remaining: float,
+    bar_width: int,
+    *,
+    remain_rgb: tuple[int, int, int],
+) -> None:
+    """Draw 24 equal hour segments; left-to-right shows spent (dark) then left."""
     margin = 8
     inner_w = max(1, bar_width - 2 * margin)
     segment_widths, gap = hour_bar_segment_layout(inner_w, _SEGMENT_GAP)
@@ -1768,8 +1896,6 @@ def _draw_hour_bar(surface: pygame.Surface, hours_remaining: float, bar_width: i
     spent = HOURS_PER_DRAGON_DAY - hr
 
     spent_rgb = (45, 48, 58)
-    remain_rgb = (72, 160, 96)
-
     x_pos = margin
     y = _BAR_TOP_Y
     for i in range(24):
@@ -1953,6 +2079,8 @@ def run_movement_playtest(
         army_overlay_attack_rect: pygame.Rect | None = None
         army_overlay_retreat_rect: pygame.Rect | None = None
         splitter_drag: Literal["left", "right"] | None = None
+        editor_paint_drag_active: bool = False
+        last_editor_paint_coord: OffsetCoord | None = None
         dragon_upgrade_overlay_active = False
         dragon_upgrade_draft: list[DragonUpgradeStat] = []
         dragon_upgrade_overlay_baseline: DragonUpgradeBaseline | None = None
@@ -2315,9 +2443,7 @@ def run_movement_playtest(
                     slot_w = win_w - slot_x - 28
                     if slot_w >= 120:
                         column_h = win_h - y0 - 50
-                        portrait_max_h = max(
-                            80, column_h - desc_reserved_h - desc_top_gap
-                        )
+                        portrait_max_h = max(80, column_h - desc_reserved_h - desc_top_gap)
                         portrait = scaled_to_fit(preview_img, slot_w, portrait_max_h)
                         surf.blit(portrait, (slot_x, y0))
                         _draw_dragon_selection_description(
@@ -2328,13 +2454,9 @@ def run_movement_playtest(
                     else:
                         below_y = btn_play.bottom + 20
                         column_h = win_h - below_y - 90
-                        portrait_max_h = max(
-                            72, column_h - desc_reserved_h - desc_top_gap
-                        )
+                        portrait_max_h = max(72, column_h - desc_reserved_h - desc_top_gap)
                         if portrait_max_h >= 72:
-                            portrait = scaled_to_fit(
-                                preview_img, pick_list_w, portrait_max_h
-                            )
+                            portrait = scaled_to_fit(preview_img, pick_list_w, portrait_max_h)
                             surf.blit(portrait, (60, below_y))
                             _draw_dragon_selection_description(
                                 60,
@@ -2347,12 +2469,13 @@ def run_movement_playtest(
 
             elif screen == "game" and game_map is not None and dragon is not None:
                 assert citadel_coord is not None
+                ui_theme = dragon_ui_theme_for_kind(dragon.kind)
                 caption_bits = [
                     f"Day {day_index}",
                     f"Gold {dragon.gold}",
                     f"Citadel HP {citadel_hp}/{CITADEL_STARTING_HP}",
                     display_name_for_kind(dragon.kind),
-                    "Green bar = hours left",
+                    "Hour bar = hours left",
                     "Muted = unreachable",
                     "Right-click: inspect",
                     "Citadel: upgrades then next day",
@@ -2361,7 +2484,12 @@ def run_movement_playtest(
                     caption_bits.insert(3, "GAME OVER")
                 caption = font.render("  |  ".join(caption_bits), True, (210, 210, 220))
                 surf.blit(caption, (8, 6))
-                _draw_hour_bar(surf, dragon.hours_remaining, win_w)
+                _draw_hour_bar(
+                    surf,
+                    dragon.hours_remaining,
+                    win_w,
+                    remain_rgb=ui_theme.hour_remain_rgb,
+                )
 
                 map_area_h = win_h - TIME_BAR_HEIGHT - SETTINGS_BAR_HEIGHT
                 map_viewport = _map_viewport_rect(
@@ -2383,6 +2511,38 @@ def run_movement_playtest(
                     clear_background=False,
                 )
                 _draw_army_markers_on_map(surf, active_armies, hex_size, origin)
+                if (
+                    inspector_focus_coord is not None
+                    and game_map.get(inspector_focus_coord) is not None
+                ):
+                    draw_hex_outline(
+                        surf,
+                        coord=inspector_focus_coord,
+                        hex_size=hex_size,
+                        origin=origin,
+                        rgb=ui_theme.accent_rgb,
+                        width=2,
+                    )
+
+                if targeting_ability_name is not None:
+                    mx_target, my_target = pygame.mouse.get_pos()
+                    if map_viewport.collidepoint(mx_target, my_target):
+                        hovered_coord = _pick_tile_at_pixel(
+                            float(mx_target),
+                            float(my_target),
+                            game_map,
+                            hex_size,
+                            origin,
+                        )
+                        if hovered_coord is not None:
+                            draw_hex_outline(
+                                surf,
+                                coord=hovered_coord,
+                                hex_size=hex_size,
+                                origin=origin,
+                                rgb=ui_theme.accent_rgb,
+                                width=2,
+                            )
 
                 cx, cy = _dragon_screen_center(dragon.position, hex_size, origin)
                 marker_side = int(max(8, min(hex_size * 1.35, hex_size * 1.55) * 2))
@@ -2407,6 +2567,7 @@ def run_movement_playtest(
                     font,
                     font_small,
                     panel_rect=dragon_panel_rect,
+                    theme=ui_theme,
                     dragon=dragon,
                     world=game_map,
                     scroll_y=dragon_panel_scroll,
@@ -2419,6 +2580,7 @@ def run_movement_playtest(
                     dragon_panel_rect,
                     scroll_y=dragon_panel_scroll,
                     content_height=dragon_panel_content_h,
+                    border_rgb=ui_theme.border_rgb,
                 )
 
                 panel_rect = pygame.Rect(
@@ -2437,6 +2599,7 @@ def run_movement_playtest(
                     font,
                     font_small,
                     panel_rect=panel_rect,
+                    theme=ui_theme,
                     game_map=game_map,
                     settlements_by_coord=settlements_by_coord,
                     armies_by_coord=armies_on_map,
@@ -2457,6 +2620,7 @@ def run_movement_playtest(
                     panel_rect,
                     scroll_y=inspector_panel_scroll,
                     content_height=inspector_panel_content_h,
+                    border_rgb=ui_theme.border_rgb,
                 )
 
                 if raid_combat_settlement is not None:
@@ -2464,6 +2628,7 @@ def run_movement_playtest(
                         surf,
                         font,
                         font_small,
+                        theme=ui_theme,
                         map_viewport=map_viewport,
                         dragon=dragon,
                         settlement=raid_combat_settlement,
@@ -2478,6 +2643,7 @@ def run_movement_playtest(
                         surf,
                         font,
                         font_small,
+                        theme=ui_theme,
                         map_viewport=map_viewport,
                         dragon=dragon,
                         army=army_combat_target,
@@ -2506,26 +2672,34 @@ def run_movement_playtest(
 
                 if targeting_ability_name is not None:
                     mx_t, my_t = pygame.mouse.get_pos()
-                    pygame.draw.circle(surf, (90, 210, 255), (mx_t, my_t), 7, width=2)
+                    pygame.draw.circle(surf, ui_theme.accent_rgb, (mx_t, my_t), 7, width=2)
                     _draw_text(
                         surf,
                         font_small,
                         f"Targeting {targeting_ability_name}: left-click map, right-click/Esc cancel",
                         (dragon_panel_w + 12, TIME_BAR_HEIGHT + 10),
-                        (160, 230, 255),
+                        ui_theme.accent_rgb,
                     )
 
                 bar_rect = pygame.Rect(0, win_h - SETTINGS_BAR_HEIGHT, win_w, SETTINGS_BAR_HEIGHT)
                 pygame.draw.rect(surf, _UI_BG_RGB, bar_rect)
-                pygame.draw.rect(surf, _UI_BORDER_RGB, bar_rect, width=1)
+                pygame.draw.rect(surf, ui_theme.border_rgb, bar_rect, width=1)
                 btn = pygame.Rect(win_w - 140, win_h - SETTINGS_BAR_HEIGHT + 10, 120, 36)
                 hovered = btn.collidepoint(pygame.mouse.get_pos())
-                _draw_button(surf, font_mid, btn, "Settings", hovered=hovered)
+                _draw_button(
+                    surf,
+                    font_mid,
+                    btn,
+                    "Settings",
+                    hovered=hovered,
+                    border_rgb=ui_theme.border_rgb,
+                )
 
                 dragon_upgrade_overlay_click = None
                 if dragon_upgrade_overlay_active and dragon_upgrade_overlay_baseline is not None:
                     dragon_upgrade_overlay_click = _draw_dragon_upgrade_overlay(
                         surf,
+                        theme=ui_theme,
                         client_w=win_w,
                         client_h=win_h,
                         font_mid=font_mid,
@@ -2775,6 +2949,8 @@ def run_movement_playtest(
                         break
                     if screen == "map_creator_editor":
                         editor = None
+                        editor_paint_drag_active = False
+                        last_editor_paint_coord = None
                         screen = "map_creator_setup"
                         focused_field = None
                         draft.error = ""
@@ -2782,6 +2958,8 @@ def run_movement_playtest(
                         continue
                     if screen == "map_editor":
                         editor = None
+                        editor_paint_drag_active = False
+                        last_editor_paint_coord = None
                         screen = "settings"
                         settings_status = ""
                         redraw()
@@ -2843,6 +3021,8 @@ def run_movement_playtest(
 
                 if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     splitter_drag = None
+                    editor_paint_drag_active = False
+                    last_editor_paint_coord = None
 
                 if (
                     event.type == pygame.MOUSEMOTION
@@ -2872,6 +3052,31 @@ def run_movement_playtest(
                     apply_layout(win_w, win_h)
                     redraw()
                     continue
+
+                if (
+                    event.type == pygame.MOUSEMOTION
+                    and editor_paint_drag_active
+                    and screen in ("map_creator_editor", "map_editor")
+                    and editor is not None
+                ):
+                    mx_m, my_m = event.pos
+                    toolbar_w = 240
+                    top_pad = 70
+                    bottom_pad = SETTINGS_BAR_HEIGHT
+                    map_view_drag = pygame.Rect(
+                        0, top_pad, win_w - toolbar_w, win_h - top_pad - bottom_pad
+                    )
+                    if map_view_drag.collidepoint(mx_m, my_m):
+                        chg, picked_drag = _editor_try_paint_at_pixel(
+                            editor,
+                            float(mx_m),
+                            float(my_m),
+                            map_view_drag,
+                            skip_if_same_as=last_editor_paint_coord,
+                        )
+                        if chg:
+                            last_editor_paint_coord = picked_drag
+                            redraw()
 
                 resized = client_size_from_resize_event(event)
                 if resized is not None:
@@ -3032,7 +3237,9 @@ def run_movement_playtest(
                         btn_play = pygame.Rect(
                             60, y0 + len(playable_dragon_kinds()) * 46 + 24, 200, 44
                         )
-                        can_play = pending_map_path is not None or dragon_pick_context == "same_map_reset"
+                        can_play = (
+                            pending_map_path is not None or dragon_pick_context == "same_map_reset"
+                        )
                         if btn_play.collidepoint(mx, my) and can_play:
                             if dragon_pick_context == "same_map_reset":
                                 if game_map is not None:
@@ -3099,15 +3306,11 @@ def run_movement_playtest(
                                     if phase_over or citadel_hp <= 0:
                                         citadel_hp = max(0, citadel_hp)
                                         game_over = True
-                                        inspector_message = (
-                                            "Game over — the citadel has fallen."
-                                        )
+                                        inspector_message = "Game over — the citadel has fallen."
                                     elif phase_msgs:
                                         inspector_message = phase_msgs[-1]
                                     elif citadel_hp < CITADEL_STARTING_HP:
-                                        inspector_message = (
-                                            f"Citadel struck! HP {citadel_hp}/{CITADEL_STARTING_HP}."
-                                        )
+                                        inspector_message = f"Citadel struck! HP {citadel_hp}/{CITADEL_STARTING_HP}."
                                     redraw()
                                     continue
                                 for st, rr in clk.cost.items():
@@ -3438,6 +3641,8 @@ def run_movement_playtest(
                             ok_open, msg_open, ed_state = _open_editor_from_map_path(chosen)
                             if ok_open and ed_state is not None:
                                 editor = ed_state
+                                editor_paint_drag_active = False
+                                last_editor_paint_coord = None
                                 settings_status = msg_open
                                 screen = "map_editor"
                                 redraw()
@@ -3463,9 +3668,7 @@ def run_movement_playtest(
                                 redraw()
                                 continue
                             dragon.gold += DEV_MODE_TEST_GOLD_GRANT
-                            settings_status = (
-                                f"Dev Mode: +{DEV_MODE_TEST_GOLD_GRANT:,} gold."
-                            )
+                            settings_status = f"Dev Mode: +{DEV_MODE_TEST_GOLD_GRANT:,} gold."
                             redraw()
                             continue
                         if btn_back.collidepoint(mx, my):
@@ -3518,6 +3721,8 @@ def run_movement_playtest(
                                 selected=Terrain.GRASSLAND,
                                 tiles=tiles,
                             )
+                            editor_paint_drag_active = False
+                            last_editor_paint_coord = None
                             draft.error = ""
                             focused_field = None
                             screen = "map_creator_editor"
@@ -3543,6 +3748,8 @@ def run_movement_playtest(
                             else:
                                 screen = "map_creator_setup"
                             editor = None
+                            editor_paint_drag_active = False
+                            last_editor_paint_coord = None
                             redraw()
                             continue
 
@@ -3591,53 +3798,12 @@ def run_movement_playtest(
                                     continue
 
                                 if map_view.collidepoint(mx, my):
-                                    paint_tiles: dict[OffsetCoord, Tile] = {}
-                                    for coord in editor.tiles:
-                                        cell = editor.tiles.get(coord)
-                                        cell_terrain = Terrain.GRASSLAND if cell is None else cell
-                                        sk = (
-                                            editor.settlement_kinds.get(
-                                                coord, SettlementType.VILLAGE
-                                            )
-                                            if cell_terrain is Terrain.SETTLEMENT
-                                            else None
-                                        )
-                                        paint_tiles[coord] = Tile(
-                                            coord=coord,
-                                            terrain=cell_terrain,
-                                            settlement_kind=sk,
-                                        )
-                                    edit_map = GameMap(
-                                        width=editor.width,
-                                        height=editor.height,
-                                        hex_size=float(_DEFAULT_HEX_SIZE_HINT),
-                                        orientation="flat",
-                                        tiles=paint_tiles,
+                                    editor_paint_drag_active = True
+                                    chg, picked_here = _editor_try_paint_at_pixel(
+                                        editor, float(mx), float(my), map_view
                                     )
-                                    hs, (ox, oy), _ = layout_map_on_canvas(
-                                        edit_map, map_view.w, map_view.h
-                                    )
-                                    origin_edit = (ox + float(map_view.x), oy + float(map_view.y))
-                                    picked = _pick_tile_at_pixel(
-                                        float(mx), float(my), edit_map, hs, origin_edit
-                                    )
-                                    if picked is not None:
-                                        if editor.brush == "terrain":
-                                            editor.tiles[picked] = editor.selected
-                                            if editor.selected is Terrain.SETTLEMENT:
-                                                editor.settlement_kinds[picked] = (
-                                                    editor.selected_settlement_kind
-                                                )
-                                            else:
-                                                editor.settlement_kinds.pop(picked, None)
-                                            editor.status = ""
-                                        elif editor.tiles.get(picked) is Terrain.SETTLEMENT:
-                                            editor.settlement_kinds[picked] = (
-                                                editor.selected_settlement_kind
-                                            )
-                                            editor.status = ""
-                                        else:
-                                            editor.status = "Select a settlement hex first."
+                                    last_editor_paint_coord = picked_here
+                                    if chg:
                                         redraw()
 
             if (
