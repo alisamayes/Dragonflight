@@ -6,7 +6,9 @@ from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
 from dragonflight.settlement import Village
 from dragonflight.terrain import Terrain
+from dragonflight.movement_playtest import _PlaytestArmy
 from dragonflight.tile_inspection import (
+    army_inspect_info_from_entity,
     terrain_display_name,
     tile_inspect_info,
     tile_inspector_lines,
@@ -82,6 +84,51 @@ def test_tile_inspector_lines_live_settlement_includes_stat_block() -> None:
     assert kinds.count("settlement") >= 4
     assert any("Settlement type" in ln.text for ln in lines)
     assert any("Eco:" in ln.text for ln in lines)
+
+
+def test_tile_inspect_info_includes_army_stats() -> None:
+    coord = OffsetCoord(1, 1)
+    game_map = GameMap(
+        width=5,
+        height=5,
+        hex_size=30.0,
+        orientation="flat",
+        tiles={coord: Tile(coord=coord, terrain=Terrain.GRASSLAND)},
+    )
+    army = _PlaytestArmy(position=coord, hp=300, max_hp=330, atk=45, dfn=15)
+    info = tile_inspect_info(game_map, coord, {}, armies_by_coord={coord: army})
+    assert info is not None
+    assert info.army is not None
+    assert info.army.hp == 300
+    assert info.army.atk == 45
+
+
+def test_tile_inspector_lines_include_army_block() -> None:
+    coord = OffsetCoord(2, 2)
+    game_map = GameMap(
+        width=5,
+        height=5,
+        hex_size=30.0,
+        orientation="flat",
+        tiles={coord: Tile(coord=coord, terrain=Terrain.GRASSLAND)},
+    )
+    army = _PlaytestArmy(position=coord, hp=100, max_hp=100, atk=10, dfn=5)
+    info = tile_inspect_info(game_map, coord, {}, armies_by_coord={coord: army})
+    assert info is not None
+    lines = tile_inspector_lines(info)
+    assert any(ln.kind == "army" for ln in lines)
+    assert any("Army" in ln.text for ln in lines)
+
+
+def test_army_inspect_info_ignores_defeated_army() -> None:
+    army = _PlaytestArmy(
+        position=OffsetCoord(0, 0),
+        hp=0,
+        max_hp=100,
+        atk=10,
+        dfn=5,
+    )
+    assert army_inspect_info_from_entity(army) is None
 
 
 def test_tile_inspector_lines_settlement_hex_without_entity_is_notice_only() -> None:

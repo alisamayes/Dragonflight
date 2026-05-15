@@ -36,6 +36,10 @@ class Redgon(Dragon):
     """Red dragon — high attack and flight range (``dragon_types.md``)."""
 
     DISPLAY_NAME: ClassVar[str] = "Redgon (Red)"
+    SELECTION_DESCRIPTION: ClassVar[str] = (
+        "Redgon specializes in dealing high damage fast in hit and run tactics. Redgon has a higher than average attack and significantly higher speed and flight range."
+        " This allows them to travel far across the map and even strike enemies from a distance with their abilities, dealing more damage the longer they fight."
+    )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (
         DragonAbilitySpec(
@@ -85,6 +89,10 @@ class Blackgon(Dragon):
     """Black dragon — heavy defence and thorns (``dragon_types.md``)."""
 
     DISPLAY_NAME: ClassVar[str] = "Blackgon (Black)"
+    SELECTION_DESCRIPTION: ClassVar[str] = (
+        "Blackgon boasts a heavy defence. Being an ancient dragon they are larger and slower than most other dragons but make up for it by being able to fight in sustained combat without needing to retreat."
+        "They also have access to hardened scales that deal damage to attackers allowing them to turn their defence into offensive capabilities."
+    )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (
         DragonAbilitySpec(
@@ -140,6 +148,10 @@ class Greengon(Dragon):
     """Green dragon — higher HP pool and healing focus (``dragon_types.md``)."""
 
     DISPLAY_NAME: ClassVar[str] = "Greengon (Green)"
+    SELECTION_DESCRIPTION: ClassVar[str] = (
+        "Greengon is the only dragon that is able to heal itself by harnessing healing crystal and their magic. Utilizing lifeforce they can passively sustain themselves"
+        " and heal themselve in a pinch if needed. Furthermore they can turn their higher lifeforce into offensive power through their abilities."
+    )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (
         DragonAbilitySpec(
@@ -189,6 +201,10 @@ class Yellowgon(Dragon):
     """Yellow dragon — chronomancy / mitigation (``dragon_types.md``)."""
 
     DISPLAY_NAME: ClassVar[str] = "Yellowgon (Yellow)"
+    SELECTION_DESCRIPTION: ClassVar[str] = (
+        "Yellowgon is able to manipulate time. Slowing it down to their advantage to affect the world around them, forsee and prevent incoming damage,"
+        "and even temporarliy freeze it to travel or strike without consequences." 
+    )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (
         DragonAbilitySpec(
@@ -241,6 +257,10 @@ class Purplegon(Dragon):
     """Purple dragon — frost damage and control (``dragon_types.md``)."""
 
     DISPLAY_NAME: ClassVar[str] = "Purplegon (Purple)"
+    SELECTION_DESCRIPTION: ClassVar[str] = (
+        "Purplegon is a combat oriented dragon that harnesses elemental power to augment their attacks. Hindering or damaging enemies in both melee and ranged combat. They are also heavily armoured,"
+        " imporiving their defence and offense at the cost of speed and flight range."
+    )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (
         DragonAbilitySpec(
@@ -293,6 +313,10 @@ class Browngon(Dragon):
     """Brown dragon — earth / mountain synergy (``dragon_types.md``)."""
 
     DISPLAY_NAME: ClassVar[str] = "Browngon (Brown)"
+    SELECTION_DESCRIPTION: ClassVar[str] = (
+        "Browngon is a large and slow dragon that likes the stones of the earth as much as the open sky. They are in their element near the mountains and gain advantages"
+        " when in range of them. They may even manipulate the earth around them to their advantage, creating unstable ground or even permanent terrain features."
+    )
 
     ABILITIES: ClassVar[tuple[DragonAbilitySpec, ...]] = (
         DragonAbilitySpec(
@@ -362,6 +386,14 @@ def display_name_for_kind(kind: DragonKind) -> str:
     return getattr(cls, "DISPLAY_NAME")
 
 
+def selection_description_for_kind(kind: DragonKind) -> str:
+    """Flavor text shown on the new-game dragon picker under the portrait."""
+    cls = _KIND_TO_CTOR.get(kind)
+    if cls is None:
+        return ""
+    return getattr(cls, "SELECTION_DESCRIPTION", "")
+
+
 def new_playable_dragon(kind: DragonKind, citadel_coord: OffsetCoord) -> Dragon:
     """Spawn the correct subclass instance for ``kind`` at the citadel."""
     ctor = _KIND_TO_CTOR.get(kind)
@@ -389,4 +421,5 @@ __all__ = [
     "display_name_for_kind",
     "new_playable_dragon",
     "playable_dragon_kinds",
+    "selection_description_for_kind",
 ]

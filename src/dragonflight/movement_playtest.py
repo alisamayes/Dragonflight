@@ -19,11 +19,11 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import pygame
 
-from .dragon import Dragon, DragonKind, MoveAttempt
+from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
 from .dragon_abilities import (
     ability_button_enabled,
@@ -44,6 +44,7 @@ from .dragon_playables import (
     display_name_for_kind,
     new_playable_dragon,
     playable_dragon_kinds,
+    selection_description_for_kind,
 )
 from .dragon_progression import (
     DRAGON_UPGRADE_STAT_COLUMN_ORDER,
@@ -76,6 +77,7 @@ from .render import (
     render_map,
 )
 from .settlement import (
+    MockArmySpawnEvent,
     Settlement,
     SettlementType,
     apply_settlement_raid_victory_bundle,
@@ -139,6 +141,12 @@ RAID_COMBAT_OVERLAY_HEIGHT_FRACTION: float = 0.5
 
 #: After a terminal combat outcome message, auto-close the raid overlay (milliseconds).
 RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS: int = 3000
+
+#: Citadel HP at session start (spec §10 MVP).
+CITADEL_STARTING_HP: int = 3
+
+#: Map marker for active armies (drawn under the dragon sprite).
+_ARMY_MARKER_RGB: tuple[int, int, int] = (128, 0, 200)
 
 _UI_BG_RGB: tuple[int, int, int] = (30, 32, 40)
 _UI_PANEL_RGB: tuple[int, int, int] = (38, 41, 52)
@@ -365,6 +373,79 @@ def _wrap_text_to_width(font: pygame.font.Font, text: str, max_width: int) -> li
     if current:
         lines.append(current)
     return lines
+
+
+def _clamp_panel_scroll(scroll_y: int, content_height: int, viewport_h: int) -> int:
+    return max(0, min(int(scroll_y), max(0, content_height - viewport_h)))
+
+
+@dataclass
+class _ScrollPanelLayout:
+    """Content-layout helper for a clipped, vertically scrollable side panel."""
+
+    panel_rect: pygame.Rect
+    scroll_y: int
+    pad: int = 12
+    content_y: int = 0
+    _clip_prev: pygame.Rect | None = None
+
+    @property
+    def x(self) -> int:
+        return self.panel_rect.x + self.pad
+
+    @property
+    def inner_w(self) -> int:
+        return max(1, self.panel_rect.w - 2 * self.pad)
+
+    @property
+    def viewport_h(self) -> int:
+        return max(1, self.panel_rect.h - 2 * self.pad)
+
+    def content_height_total(self) -> int:
+        return self.content_y
+
+    def max_scroll(self) -> int:
+        return max(0, self.content_y - self.viewport_h)
+
+    def screen_y(self, at_content_y: int | None = None) -> int:
+        cy = self.content_y if at_content_y is None else at_content_y
+        return self.panel_rect.y + self.pad + cy - self.scroll_y
+
+    def is_visible(self, height: int, *, at_content_y: int | None = None) -> bool:
+        sy = self.screen_y(at_content_y)
+        return sy + height > self.panel_rect.top and sy < self.panel_rect.bottom
+
+    def begin(self, surface: pygame.Surface) -> None:
+        self.content_y = 0
+        self._clip_prev = surface.get_clip()
+        surface.set_clip(self.panel_rect)
+
+    def end(self, surface: pygame.Surface) -> None:
+        if self._clip_prev is not None:
+            surface.set_clip(self._clip_prev)
+
+    def advance(self, dy: int) -> None:
+        self.content_y += dy
+
+
+def _draw_panel_scrollbar(
+    surface: pygame.Surface,
+    panel_rect: pygame.Rect,
+    *,
+    scroll_y: int,
+    content_height: int,
+    pad: int = 12,
+) -> None:
+    viewport_h = max(1, panel_rect.h - 2 * pad)
+    max_scroll = max(0, content_height - viewport_h)
+    if max_scroll <= 0:
+        return
+    track = pygame.Rect(panel_rect.right - 7, panel_rect.y + pad, 4, viewport_h)
+    pygame.draw.rect(surface, _UI_BORDER_RGB, track, border_radius=2)
+    thumb_h = max(24, int(viewport_h * viewport_h / max(content_height, 1)))
+    thumb_y = panel_rect.y + pad + int((viewport_h - thumb_h) * scroll_y / max_scroll)
+    thumb = pygame.Rect(track.x, thumb_y, track.w, thumb_h)
+    pygame.draw.rect(surface, _UI_MUTED_TEXT_RGB, thumb, border_radius=2)
 
 
 def _draw_text_field(
@@ -622,6 +703,197 @@ def _dragon_screen_center(
     return ox + cx_off, oy + cy_off
 
 
+@dataclass(slots=True)
+class _PlaytestArmy:
+    """Fallback army entity until :mod:`dragonflight.army` is available."""
+
+    position: OffsetCoord
+    hp: int
+    max_hp: int
+    atk: int
+    dfn: int
+
+
+def _try_import_army_sim() -> Any | None:
+    try:
+        from . import army as army_sim
+
+        return army_sim
+    except ImportError:
+        return None
+
+
+def _army_position(army: Any) -> OffsetCoord:
+    return army.position
+
+
+def _army_hp(army: Any) -> int:
+    return int(army.hp)
+
+
+def _set_army_hp(army: Any, hp: int) -> None:
+    army.hp = hp
+
+
+def _armies_by_coord(armies: list[Any]) -> dict[OffsetCoord, Any]:
+    out: dict[OffsetCoord, Any] = {}
+    for army in armies:
+        if _army_hp(army) > 0:
+            out[_army_position(army)] = army
+    return out
+
+
+def _fallback_army_from_spawn_event(
+    event: MockArmySpawnEvent,
+    settlements_by_coord: dict[OffsetCoord, Settlement],
+) -> _PlaytestArmy:
+    """Temporary spawn stats until the army simulation module owns creation."""
+
+    settlement = settlements_by_coord.get(event.position)
+    settlement_max_hp = settlement.max_hp if settlement is not None else 500
+    max_hp = max(1, settlement_max_hp * 66 // 100)
+    return _PlaytestArmy(
+        position=event.position,
+        hp=max_hp,
+        max_hp=max_hp,
+        atk=max(1, event.atk * 90 // 100),
+        dfn=max(0, event.dfn * 50 // 100),
+    )
+
+
+def _spawn_armies_from_events(
+    events: list[MockArmySpawnEvent],
+    *,
+    settlements_by_coord: dict[OffsetCoord, Settlement],
+    active_armies: list[Any],
+) -> int:
+    """Append armies for spawn events; returns count added."""
+
+    if not events:
+        return 0
+    sim = _try_import_army_sim()
+    added = 0
+    for event in events:
+        settlement = settlements_by_coord.get(event.position)
+        if sim is not None and hasattr(sim, "army_from_spawn_event"):
+            army = sim.army_from_spawn_event(event, settlement)
+        else:
+            army = _fallback_army_from_spawn_event(event, settlements_by_coord)
+        active_armies.append(army)
+        added += 1
+    return added
+
+
+def _prune_defeated_armies(armies: list[Any]) -> list[Any]:
+    return [a for a in armies if _army_hp(a) > 0]
+
+
+def _run_end_of_day_army_phase(
+    game_map: GameMap,
+    armies: list[Any],
+    *,
+    citadel_coord: OffsetCoord,
+    citadel_hp: int,
+) -> tuple[list[Any], int, list[str], bool]:
+    """Delegate army movement/attacks to simulation; no-op when module is absent."""
+
+    sim = _try_import_army_sim()
+    if sim is None or not hasattr(sim, "run_army_phase"):
+        return armies, citadel_hp, [], False
+
+    result = sim.run_army_phase(
+        game_map,
+        list(armies),
+        citadel_coord=citadel_coord,
+        citadel_hp=citadel_hp,
+    )
+    next_armies = list(getattr(result, "armies", armies))
+    next_hp = int(getattr(result, "citadel_hp", citadel_hp))
+    messages = list(getattr(result, "messages", ()) or ())
+    game_over = bool(getattr(result, "game_over", next_hp <= 0))
+    return next_armies, next_hp, messages, game_over
+
+
+def _validate_dragon_vs_army(
+    dragon: Dragon,
+    army: Any,
+    *,
+    citadel_coord: OffsetCoord,
+) -> tuple[bool, str]:
+    sim = _try_import_army_sim()
+    if sim is not None and hasattr(sim, "validate_dragon_vs_army"):
+        return sim.validate_dragon_vs_army(dragon, army, citadel_coord=citadel_coord)
+
+    if dragon.position != _army_position(army):
+        return False, "dragon must occupy the army hex to attack"
+    budget = dragon.validate_damage_round_preserves_return_to_citadel(citadel_coord)
+    if not budget.ok:
+        return False, budget.reason
+    return True, ""
+
+
+def _resolve_army_combat_round(
+    dragon: Dragon,
+    army: Any,
+    world: GameMap,
+    *,
+    citadel_coord: OffsetCoord,
+) -> DamageRoundExchange | MoveAttempt:
+    sim = _try_import_army_sim()
+    if sim is not None and hasattr(sim, "resolve_army_combat_round"):
+        return sim.resolve_army_combat_round(
+            dragon,
+            army,
+            world,
+            citadel_coord=citadel_coord,
+        )
+
+    budget = dragon.validate_damage_round_preserves_return_to_citadel(citadel_coord)
+    if not budget.ok:
+        return budget
+
+    exchange = dragon.attack_army(
+        army_hp=_army_hp(army),
+        army_atk=int(army.atk),
+        army_dfn=int(army.dfn),
+        world=world,
+    )
+    if isinstance(exchange, DamageRoundExchange):
+        _set_army_hp(army, exchange.target_hp_after)
+    return exchange
+
+
+def _draw_army_markers_on_map(
+    surface: pygame.Surface,
+    armies: list[Any],
+    hex_size: float,
+    origin: tuple[float, float],
+) -> None:
+    """Purple X on each hex with a live army (below the dragon marker)."""
+
+    half = max(5, int(hex_size * 0.28))
+    line_w = max(2, int(hex_size * 0.1))
+    for army in armies:
+        if _army_hp(army) <= 0:
+            continue
+        cx, cy = _dragon_screen_center(_army_position(army), hex_size, origin)
+        icx, icy = int(round(cx)), int(round(cy))
+        pygame.draw.line(
+            surface,
+            _ARMY_MARKER_RGB,
+            (icx - half, icy - half),
+            (icx + half, icy + half),
+            line_w,
+        )
+        pygame.draw.line(
+            surface,
+            _ARMY_MARKER_RGB,
+            (icx - half, icy + half),
+            (icx + half, icy - half),
+            line_w,
+        )
+
+
 def _map_viewport_rect(
     client_w: int,
     client_h: int,
@@ -694,44 +966,60 @@ def _draw_dragon_panel(
     panel_rect: pygame.Rect,
     dragon: Dragon,
     world: GameMap,
-) -> dict[str, pygame.Rect]:
+    scroll_y: int = 0,
+) -> tuple[dict[str, pygame.Rect], int]:
     """Left column: dragon identity, level, combat/move stats, and unlocked abilities."""
 
     pygame.draw.rect(surface, _UI_PANEL_RGB, panel_rect)
     pygame.draw.rect(surface, _UI_BORDER_RGB, panel_rect, width=1)
 
-    pad = 12
-    x = panel_rect.x + pad
-    y = panel_rect.y + pad
-    line_gap = 22
+    layout = _ScrollPanelLayout(panel_rect=panel_rect, scroll_y=scroll_y)
+    layout.begin(surface)
 
-    inner_w = max(1, panel_rect.w - 2 * pad)
+    line_gap = 22
+    line_h_small = font_small.get_height()
     portrait = load_detailed_sprite(dragon.kind)
     if portrait is not None:
-        art_max_h = min(200, max(72, int(inner_w * 0.75)))
-        scaled = scaled_to_fit(portrait, inner_w, art_max_h)
-        art_rect = scaled.get_rect()
-        art_rect.topleft = (x, y)
-        surface.blit(scaled, art_rect)
-        y = art_rect.bottom + 10
+        art_max_h = min(200, max(72, int(layout.inner_w * 0.75)))
+        scaled = scaled_to_fit(portrait, layout.inner_w, art_max_h)
+        if layout.is_visible(scaled.get_height()):
+            surface.blit(scaled, (layout.x, layout.screen_y()))
+        layout.advance(scaled.get_height() + 10)
 
-    _draw_text(surface, font, "Dragon", (x, y), _UI_TEXT_RGB)
-    y += 28
-    _draw_text(
-        surface,
-        font_small,
-        display_name_for_kind(dragon.kind),
-        (x, y),
-        _UI_TEXT_RGB,
-    )
-    y += line_gap
-    _draw_text(surface, font_small, f"Level: {dragon.level}", (x, y), _UI_MUTED_TEXT_RGB)
-    y += line_gap
-    _draw_text(surface, font_small, f"Gold: {dragon.gold}", (x, y), _UI_MUTED_TEXT_RGB)
-    y += line_gap + 6
+    if layout.is_visible(line_h_small):
+        _draw_text(surface, font, "Dragon", (layout.x, layout.screen_y()), _UI_TEXT_RGB)
+    layout.advance(28)
+    if layout.is_visible(line_h_small):
+        _draw_text(
+            surface,
+            font_small,
+            display_name_for_kind(dragon.kind),
+            (layout.x, layout.screen_y()),
+            _UI_TEXT_RGB,
+        )
+    layout.advance(line_gap)
+    if layout.is_visible(line_h_small):
+        _draw_text(
+            surface,
+            font_small,
+            f"Level: {dragon.level}",
+            (layout.x, layout.screen_y()),
+            _UI_MUTED_TEXT_RGB,
+        )
+    layout.advance(line_gap)
+    if layout.is_visible(line_h_small):
+        _draw_text(
+            surface,
+            font_small,
+            f"Gold: {dragon.gold}",
+            (layout.x, layout.screen_y()),
+            _UI_MUTED_TEXT_RGB,
+        )
+    layout.advance(line_gap + 6)
 
-    _draw_text(surface, font_small, "Base Stats", (x, y), _UI_TEXT_RGB)
-    y += line_gap
+    if layout.is_visible(line_h_small):
+        _draw_text(surface, font_small, "Base Stats", (layout.x, layout.screen_y()), _UI_TEXT_RGB)
+    layout.advance(line_gap)
     vivify_bonus = int(dragon.passive_stacks.get("Vivify max hp bonus", 0))
     base_max_hp = max(1, dragon.max_hp - vivify_bonus)
     base_stats = (
@@ -741,96 +1029,114 @@ def _draw_dragon_panel(
         f"Speed: {dragon.speed_hexes_per_hour:g} hex/h",
     )
     for line in base_stats:
-        _draw_text(surface, font_small, line, (x, y), _UI_MUTED_TEXT_RGB)
-        y += line_gap
+        if layout.is_visible(line_h_small):
+            _draw_text(surface, font_small, line, (layout.x, layout.screen_y()), _UI_MUTED_TEXT_RGB)
+        layout.advance(line_gap)
 
-    y += 6
-    _draw_text(surface, font_small, "Combat Stats", (x, y), _UI_TEXT_RGB)
-    y += line_gap
+    layout.advance(6)
+    if layout.is_visible(line_h_small):
+        _draw_text(
+            surface, font_small, "Combat Stats", (layout.x, layout.screen_y()), _UI_TEXT_RGB
+        )
+    layout.advance(line_gap)
     combat_atk = effective_attack(dragon, world=world)
     combat_dfn = effective_defence(dragon)
     combat_range = effective_flight_range(dragon)
     combat_speed = effective_speed_hexes_per_hour(dragon, world=world)
     boosted_rgb = (170, 230, 170)
-    _draw_text(
-        surface,
-        font_small,
-        f"HP: {dragon.hp} / {dragon.max_hp}",
-        (x, y),
-        boosted_rgb if dragon.max_hp > base_max_hp else _UI_MUTED_TEXT_RGB,
+    combat_lines = (
+        (f"HP: {dragon.hp} / {dragon.max_hp}", dragon.max_hp > base_max_hp),
+        (
+            f"ATK: {combat_atk}  |  DFN: {combat_dfn}",
+            combat_atk > dragon.atk or combat_dfn > dragon.dfn,
+        ),
+        (f"Flight range: {combat_range} hexes", combat_range > dragon.flight_range_hexes),
+        (f"Speed: {combat_speed:g} hex/h", combat_speed > dragon.speed_hexes_per_hour),
     )
-    y += line_gap
-    _draw_text(
-        surface,
-        font_small,
-        f"ATK: {combat_atk}  |  DFN: {combat_dfn}",
-        (x, y),
-        boosted_rgb if combat_atk > dragon.atk or combat_dfn > dragon.dfn else _UI_MUTED_TEXT_RGB,
-    )
-    y += line_gap
-    _draw_text(
-        surface,
-        font_small,
-        f"Flight range: {combat_range} hexes",
-        (x, y),
-        boosted_rgb if combat_range > dragon.flight_range_hexes else _UI_MUTED_TEXT_RGB,
-    )
-    y += line_gap
-    _draw_text(
-        surface,
-        font_small,
-        f"Speed: {combat_speed:g} hex/h",
-        (x, y),
-        boosted_rgb if combat_speed > dragon.speed_hexes_per_hour else _UI_MUTED_TEXT_RGB,
-    )
-    y += line_gap
+    for line, boosted in combat_lines:
+        if layout.is_visible(line_h_small):
+            _draw_text(
+                surface,
+                font_small,
+                line,
+                (layout.x, layout.screen_y()),
+                boosted_rgb if boosted else _UI_MUTED_TEXT_RGB,
+            )
+        layout.advance(line_gap)
 
-    y += 6
-    _draw_text(surface, font_small, "Abilities", (x, y), _UI_TEXT_RGB)
-    y += line_gap
+    layout.advance(6)
+    if layout.is_visible(line_h_small):
+        _draw_text(surface, font_small, "Abilities", (layout.x, layout.screen_y()), _UI_TEXT_RGB)
+    layout.advance(line_gap)
     ability_buttons: dict[str, pygame.Rect] = {}
-    max_text_w = panel_rect.w - 2 * pad
     mx, my = pygame.mouse.get_pos()
     specs = unlocked_ability_specs(dragon)
     if not specs:
-        _draw_text(surface, font_small, "No abilities unlocked yet.", (x, y), _UI_MUTED_TEXT_RGB)
-        return ability_buttons
+        if layout.is_visible(line_h_small):
+            _draw_text(
+                surface,
+                font_small,
+                "No abilities unlocked yet.",
+                (layout.x, layout.screen_y()),
+                _UI_MUTED_TEXT_RGB,
+            )
+        layout.end(surface)
+        return ability_buttons, layout.content_height_total()
 
     for spec in specs:
-        if y > panel_rect.bottom - 32:
-            _draw_text(surface, font_small, "…", (x, y), _UI_MUTED_TEXT_RGB)
-            break
         label = f"{spec.name} ({'Passive' if spec.category == 'passive' else 'Ability'})"
-        _draw_text(surface, font_small, label, (x, y), _UI_TEXT_RGB)
-        y += 18
+        if layout.is_visible(line_h_small):
+            _draw_text(surface, font_small, label, (layout.x, layout.screen_y()), _UI_TEXT_RGB)
+        layout.advance(18)
         for detail in ability_ui_detail_lines(dragon, spec, world=world):
-            for line in _wrap_text_to_width(font_small, detail, max_text_w):
-                if y > panel_rect.bottom - 18:
-                    break
-                _draw_text(surface, font_small, line, (x, y), _UI_MUTED_TEXT_RGB)
-                y += 17
-            if y > panel_rect.bottom - 18:
-                break
+            for line in _wrap_text_to_width(font_small, detail, layout.inner_w):
+                if layout.is_visible(line_h_small):
+                    _draw_text(
+                        surface,
+                        font_small,
+                        line,
+                        (layout.x, layout.screen_y()),
+                        _UI_MUTED_TEXT_RGB,
+                    )
+                layout.advance(17)
         if spec.category == "passive":
-            _draw_text(surface, font_small, "Active", (x, y), (170, 220, 170))
-            y += 24
+            if layout.is_visible(line_h_small):
+                _draw_text(
+                    surface,
+                    font_small,
+                    "Active",
+                    (layout.x, layout.screen_y()),
+                    (170, 220, 170),
+                )
+            layout.advance(24)
             continue
         status = ability_status_label(dragon, spec.name)
-        _draw_text(surface, font_small, status, (x, y), _UI_MUTED_TEXT_RGB)
-        y += 18
-        btn = pygame.Rect(x, y, max(80, max_text_w), 28)
+        if layout.is_visible(line_h_small):
+            _draw_text(
+                surface,
+                font_small,
+                status,
+                (layout.x, layout.screen_y()),
+                _UI_MUTED_TEXT_RGB,
+            )
+        layout.advance(18)
+        btn_h = 28
+        btn = pygame.Rect(layout.x, layout.screen_y(), max(80, layout.inner_w), btn_h)
         enabled = ability_button_enabled(dragon, spec.name)
-        _draw_button(
-            surface,
-            font_small,
-            btn,
-            "Target" if ability_requires_target(spec.name) else "Use",
-            hovered=enabled and btn.collidepoint(mx, my),
-            active=enabled,
-        )
+        if layout.is_visible(btn_h):
+            _draw_button(
+                surface,
+                font_small,
+                btn,
+                "Target" if ability_requires_target(spec.name) else "Use",
+                hovered=enabled and btn.collidepoint(mx, my),
+                active=enabled,
+            )
         ability_buttons[spec.name] = btn
-        y += 36
-    return ability_buttons
+        layout.advance(36)
+
+    layout.end(surface)
+    return ability_buttons, layout.content_height_total()
 
 
 def _draw_raid_combat_overlay(
@@ -893,6 +1199,81 @@ def _draw_raid_combat_overlay(
         ys += 20
 
     mid_y = max(yd, ys) + 10
+    if banner:
+        _draw_text(surface, font_small, banner, (cx, mid_y), (200, 220, 160))
+        mid_y += 24
+
+    btn_y = overlay.bottom - inner_pad - 40
+    btn_w = max(100, (overlay.w - 3 * inner_pad) // 2)
+    attack_rect = pygame.Rect(cx, btn_y, btn_w, 36)
+    retreat_rect = pygame.Rect(cx + btn_w + inner_pad, btn_y, btn_w, 36)
+    mx, my = pygame.mouse.get_pos()
+    _draw_button(surface, font, attack_rect, "Attack", hovered=attack_rect.collidepoint(mx, my))
+    _draw_button(surface, font, retreat_rect, "Retreat", hovered=retreat_rect.collidepoint(mx, my))
+    return attack_rect, retreat_rect
+
+
+def _draw_army_combat_overlay(
+    surface: pygame.Surface,
+    font: pygame.font.Font,
+    font_small: pygame.font.Font,
+    *,
+    map_viewport: pygame.Rect,
+    dragon: Dragon,
+    army: Any,
+    banner: str,
+) -> tuple[pygame.Rect, pygame.Rect]:
+    """Bottom-half overlay for dragon-vs-army combat; returns (attack_rect, retreat_rect)."""
+
+    oh = max(80, int(float(map_viewport.h) * RAID_COMBAT_OVERLAY_HEIGHT_FRACTION))
+    overlay = pygame.Rect(map_viewport.x, map_viewport.bottom - oh, map_viewport.w, oh)
+
+    shade = pygame.Surface((overlay.w, overlay.h), pygame.SRCALPHA)
+    shade.fill((24, 26, 34, 236))
+    surface.blit(shade, overlay.topleft)
+    pygame.draw.rect(surface, _UI_BORDER_RGB, overlay, width=1)
+
+    inner_pad = 14
+    cx = overlay.x + inner_pad
+    cy = overlay.y + inner_pad
+    col_w = max(120, (overlay.w - 3 * inner_pad) // 2)
+
+    _draw_text(surface, font, "Army combat", (cx, cy), _UI_TEXT_RGB)
+    cy += 26
+
+    col_dragon_x = cx
+    col_army_x = cx + col_w + inner_pad
+    y0 = cy
+    d_portrait = load_detailed_sprite(dragon.kind)
+    if d_portrait is not None:
+        ph = min(72, max(40, overlay.h // 5))
+        ps = scaled_to_fit(d_portrait, col_w, ph)
+        surface.blit(ps, (col_dragon_x, y0))
+        y0 += ps.get_height() + 6
+    _draw_text(surface, font_small, "Dragon", (col_dragon_x, y0), _UI_TEXT_RGB)
+    _draw_text(surface, font_small, "Army", (col_army_x, y0), _UI_TEXT_RGB)
+    y0 += 22
+    army_max_hp = int(getattr(army, "max_hp", _army_hp(army)))
+    d_lines = (
+        f"HP: {dragon.hp} / {dragon.max_hp}",
+        f"ATK: {dragon.atk}",
+        f"DFN: {dragon.dfn}",
+    )
+    a_lines = (
+        f"HP: {_army_hp(army)} / {army_max_hp}",
+        f"ATK: {int(army.atk)}",
+        f"DFN: {int(army.dfn)}",
+    )
+    yd = y0
+    for line in d_lines:
+        _draw_text(surface, font_small, line, (col_dragon_x, yd), _UI_MUTED_TEXT_RGB)
+        yd += 20
+    ya = y0
+    for line in a_lines:
+        _draw_text(surface, font_small, line, (col_army_x, ya), _UI_MUTED_TEXT_RGB)
+        ya += 20
+
+    mid_y = max(yd, ya) + 10
     if banner:
         _draw_text(surface, font_small, banner, (cx, mid_y), (200, 220, 160))
         mid_y += 24
@@ -1188,75 +1569,129 @@ def _draw_tile_inspector_panel(
     panel_rect: pygame.Rect,
     game_map: GameMap,
     settlements_by_coord: dict[OffsetCoord, Settlement],
+    armies_by_coord: dict[OffsetCoord, Any],
     inspector_focus_coord: OffsetCoord | None,
     inspector_message: str,
     dragon: Dragon,
+    citadel_coord: OffsetCoord,
     raid_combat_active: bool,
-) -> pygame.Rect | None:
-    """Paint tile details and optional Raid control; returns Raid button rect when shown."""
+    army_combat_active: bool,
+    game_over: bool,
+    scroll_y: int = 0,
+) -> tuple[pygame.Rect | None, pygame.Rect | None, int]:
+    """Paint tile details; returns optional (raid_rect, attack_army_rect) and content height."""
 
     pygame.draw.rect(surface, _UI_PANEL_RGB, panel_rect)
     pygame.draw.rect(surface, _UI_BORDER_RGB, panel_rect, width=1)
 
-    pad = 12
-    x = panel_rect.x + pad
-    y = panel_rect.y + pad
-    line_gap = 22
+    layout = _ScrollPanelLayout(panel_rect=panel_rect, scroll_y=scroll_y)
+    layout.begin(surface)
 
-    _draw_text(surface, font, "Tile inspector", (x, y), _UI_TEXT_RGB)
-    y += 32
+    line_gap = 22
+    line_h_small = font_small.get_height()
+    title_h = font.get_height()
+
+    if layout.is_visible(title_h):
+        _draw_text(surface, font, "Tile inspector", (layout.x, layout.screen_y()), _UI_TEXT_RGB)
+    layout.advance(32)
 
     raid_click_rect: pygame.Rect | None = None
+    army_attack_click_rect: pygame.Rect | None = None
+    combat_busy = raid_combat_active or army_combat_active
+    mx, my = pygame.mouse.get_pos()
 
     if inspector_focus_coord is None:
-        _draw_text(
-            surface,
-            font_small,
-            "Right-click the map for terrain details.",
-            (x, y),
-            _UI_MUTED_TEXT_RGB,
-        )
+        if layout.is_visible(line_h_small):
+            _draw_text(
+                surface,
+                font_small,
+                "Right-click the map for terrain details.",
+                (layout.x, layout.screen_y()),
+                _UI_MUTED_TEXT_RGB,
+            )
+        layout.advance(line_gap)
     else:
-        info = tile_inspect_info(game_map, inspector_focus_coord, settlements_by_coord)
+        info = tile_inspect_info(
+            game_map,
+            inspector_focus_coord,
+            settlements_by_coord,
+            armies_by_coord=armies_by_coord,
+        )
         if info is None:
-            _draw_text(surface, font_small, "Off-map.", (x, y), _UI_MUTED_TEXT_RGB)
+            if layout.is_visible(line_h_small):
+                _draw_text(
+                    surface,
+                    font_small,
+                    "Off-map.",
+                    (layout.x, layout.screen_y()),
+                    _UI_MUTED_TEXT_RGB,
+                )
+            layout.advance(line_gap)
         else:
             coord_label = f"Offset col {info.coord.col}, row {info.coord.row}"
-            _draw_text(surface, font_small, coord_label, (x, y), _UI_MUTED_TEXT_RGB)
-            y += line_gap
+            if layout.is_visible(line_h_small):
+                _draw_text(
+                    surface,
+                    font_small,
+                    coord_label,
+                    (layout.x, layout.screen_y()),
+                    _UI_MUTED_TEXT_RGB,
+                )
+            layout.advance(line_gap)
 
             for row in tile_inspector_lines(info):
                 rgb = (240, 160, 120) if row.kind == "notice" else _UI_TEXT_RGB
-                _draw_text(surface, font_small, row.text, (x, y), rgb)
-                y += line_gap
+                if layout.is_visible(line_h_small):
+                    _draw_text(
+                        surface,
+                        font_small,
+                        row.text,
+                        (layout.x, layout.screen_y()),
+                        rgb,
+                    )
+                layout.advance(line_gap)
+
+            settlement_entity = settlements_by_coord.get(inspector_focus_coord)
+            army_entity = armies_by_coord.get(inspector_focus_coord)
+            btn_h = 38
 
             if info.settlement is not None:
                 spoils_gold = raid_victory_gold_from_eco(info.settlement.eco)
                 spoils = f"Raid Spoils: {spoils_gold}"
-                _draw_text(surface, font_small, spoils, (x, y), _UI_MUTED_TEXT_RGB)
-                y += line_gap
+                if layout.is_visible(line_h_small):
+                    _draw_text(
+                        surface,
+                        font_small,
+                        spoils,
+                        (layout.x, layout.screen_y()),
+                        _UI_MUTED_TEXT_RGB,
+                    )
+                layout.advance(line_gap)
 
-                settlement_entity = settlements_by_coord.get(inspector_focus_coord)
                 can_raid = False
-                if settlement_entity is not None and not raid_combat_active:
+                if settlement_entity is not None and not combat_busy and not game_over:
                     can_raid, _ = validate_settlement_raid(dragon, settlement_entity, game_map)
 
-                btn_h = 38
                 raid_rect = pygame.Rect(
-                    panel_rect.x + pad,
-                    panel_rect.bottom - pad - btn_h,
-                    panel_rect.w - 2 * pad,
+                    layout.x,
+                    layout.screen_y(),
+                    layout.inner_w,
                     btn_h,
                 )
                 if can_raid:
-                    mx, my = pygame.mouse.get_pos()
-                    hovered = raid_rect.collidepoint(mx, my)
-                    _draw_button(surface, font, raid_rect, "Raid", hovered=hovered)
+                    if layout.is_visible(btn_h):
+                        _draw_button(
+                            surface,
+                            font,
+                            raid_rect,
+                            "Raid",
+                            hovered=raid_rect.collidepoint(mx, my),
+                        )
                     raid_click_rect = raid_rect
-                else:
+                elif layout.is_visible(btn_h):
                     pygame.draw.rect(surface, _UI_INPUT_RGB, raid_rect, border_radius=6)
                     pygame.draw.rect(surface, _UI_BORDER_RGB, raid_rect, width=1, border_radius=6)
-                    lbl = "Raid (busy…)" if raid_combat_active else "Raid (stand on settlement)"
+                    lbl = "Raid (busy…)" if combat_busy else "Raid (stand on settlement)"
                     label_surf = font_small.render(lbl, True, _UI_MUTED_TEXT_RGB)
                     surface.blit(
                         label_surf,
@@ -1265,18 +1700,62 @@ def _draw_tile_inspector_panel(
                             raid_rect.y + (raid_rect.h - label_surf.get_height()) // 2,
                         ),
                     )
+                layout.advance(btn_h + 8)
+
+            if army_entity is not None:
+                can_attack = False
+                if not combat_busy and not game_over:
+                    can_attack, _ = _validate_dragon_vs_army(
+                        dragon,
+                        army_entity,
+                        citadel_coord=citadel_coord,
+                    )
+
+                army_rect = pygame.Rect(
+                    layout.x,
+                    layout.screen_y(),
+                    layout.inner_w,
+                    btn_h,
+                )
+                if can_attack:
+                    if layout.is_visible(btn_h):
+                        _draw_button(
+                            surface,
+                            font,
+                            army_rect,
+                            "Attack",
+                            hovered=army_rect.collidepoint(mx, my),
+                        )
+                    army_attack_click_rect = army_rect
+                elif layout.is_visible(btn_h):
+                    pygame.draw.rect(surface, _UI_INPUT_RGB, army_rect, border_radius=6)
+                    pygame.draw.rect(surface, _UI_BORDER_RGB, army_rect, width=1, border_radius=6)
+                    lbl = "Attack (busy…)" if combat_busy else "Attack (stand on army)"
+                    label_surf = font_small.render(lbl, True, _UI_MUTED_TEXT_RGB)
+                    surface.blit(
+                        label_surf,
+                        (
+                            army_rect.x + (army_rect.w - label_surf.get_width()) // 2,
+                            army_rect.y + (army_rect.h - label_surf.get_height()) // 2,
+                        ),
+                    )
+                layout.advance(btn_h + 8)
 
     if inspector_message:
-        msg_y = panel_rect.bottom - SETTINGS_BAR_HEIGHT // 2 - 8
-        _draw_text(
-            surface,
-            font_small,
-            inspector_message,
-            (x, min(msg_y, panel_rect.bottom - 24)),
-            (200, 220, 160),
-        )
+        layout.advance(8)
+        for line in _wrap_text_to_width(font_small, inspector_message, layout.inner_w):
+            if layout.is_visible(line_h_small):
+                _draw_text(
+                    surface,
+                    font_small,
+                    line,
+                    (layout.x, layout.screen_y()),
+                    (200, 220, 160),
+                )
+            layout.advance(line_gap)
 
-    return raid_click_rect
+    layout.end(surface)
+    return raid_click_rect, army_attack_click_rect, layout.content_height_total()
 
 
 def _draw_hour_bar(surface: pygame.Surface, hours_remaining: float, bar_width: int) -> None:
@@ -1453,13 +1932,26 @@ def run_movement_playtest(
         inspector_focus_coord: OffsetCoord | None = None
         inspector_message: str = ""
         inspector_raid_button_rect: pygame.Rect | None = None
+        inspector_army_attack_button_rect: pygame.Rect | None = None
         dragon_ability_button_rects: dict[str, pygame.Rect] = {}
+        dragon_panel_scroll: int = 0
+        inspector_panel_scroll: int = 0
+        dragon_panel_content_h: int = 0
+        inspector_panel_content_h: int = 0
         targeting_ability_name: str | None = None
         raid_combat_settlement: Settlement | None = None
         raid_overlay_banner: str = ""
         raid_overlay_auto_close_deadline_ms: int | None = None
         raid_overlay_attack_rect: pygame.Rect | None = None
         raid_overlay_retreat_rect: pygame.Rect | None = None
+        active_armies: list[Any] = []
+        citadel_hp: int = CITADEL_STARTING_HP
+        game_over: bool = False
+        army_combat_target: Any | None = None
+        army_overlay_banner: str = ""
+        army_overlay_auto_close_deadline_ms: int | None = None
+        army_overlay_attack_rect: pygame.Rect | None = None
+        army_overlay_retreat_rect: pygame.Rect | None = None
         splitter_drag: Literal["left", "right"] | None = None
         dragon_upgrade_overlay_active = False
         dragon_upgrade_draft: list[DragonUpgradeStat] = []
@@ -1567,8 +2059,12 @@ def run_movement_playtest(
             nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
             nonlocal raid_overlay_auto_close_deadline_ms
+            nonlocal active_armies, citadel_hp, game_over
+            nonlocal army_combat_target, army_overlay_banner, army_overlay_auto_close_deadline_ms
+            nonlocal inspector_army_attack_button_rect
             nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
+            nonlocal dragon_panel_scroll, inspector_panel_scroll
             game_map = new_map
             citadel_coord = _find_citadel_coord(game_map)
             dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
@@ -1577,10 +2073,19 @@ def run_movement_playtest(
             inspector_focus_coord = None
             inspector_message = ""
             dragon_ability_button_rects = {}
+            dragon_panel_scroll = 0
+            inspector_panel_scroll = 0
             targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
             raid_overlay_auto_close_deadline_ms = None
+            inspector_army_attack_button_rect = None
+            active_armies = []
+            citadel_hp = CITADEL_STARTING_HP
+            game_over = False
+            army_combat_target = None
+            army_overlay_banner = ""
+            army_overlay_auto_close_deadline_ms = None
             dragon_upgrade_overlay_active = False
             dragon_upgrade_draft = []
             dragon_upgrade_overlay_baseline = None
@@ -1597,8 +2102,12 @@ def run_movement_playtest(
             nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
             nonlocal raid_overlay_auto_close_deadline_ms
+            nonlocal active_armies, citadel_hp, game_over
+            nonlocal army_combat_target, army_overlay_banner, army_overlay_auto_close_deadline_ms
+            nonlocal inspector_army_attack_button_rect
             nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
+            nonlocal dragon_panel_scroll, inspector_panel_scroll
             if pending_map_path is None:
                 return False, "No map selected."
             try:
@@ -1624,10 +2133,19 @@ def run_movement_playtest(
             inspector_focus_coord = None
             inspector_message = ""
             dragon_ability_button_rects = {}
+            dragon_panel_scroll = 0
+            inspector_panel_scroll = 0
             targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
             raid_overlay_auto_close_deadline_ms = None
+            inspector_army_attack_button_rect = None
+            active_armies = []
+            citadel_hp = CITADEL_STARTING_HP
+            game_over = False
+            army_combat_target = None
+            army_overlay_banner = ""
+            army_overlay_auto_close_deadline_ms = None
             dragon_upgrade_overlay_active = False
             dragon_upgrade_draft = []
             dragon_upgrade_overlay_baseline = None
@@ -1642,9 +2160,12 @@ def run_movement_playtest(
             _sync_settlements_from_map()
 
         def redraw() -> None:
-            nonlocal inspector_raid_button_rect
+            nonlocal inspector_raid_button_rect, inspector_army_attack_button_rect
             nonlocal dragon_ability_button_rects
+            nonlocal dragon_panel_scroll, inspector_panel_scroll
+            nonlocal dragon_panel_content_h, inspector_panel_content_h
             nonlocal raid_overlay_attack_rect, raid_overlay_retreat_rect
+            nonlocal army_overlay_attack_rect, army_overlay_retreat_rect
             nonlocal dragon_upgrade_overlay_click
             surf = pygame.display.get_surface()
             surf.fill(BACKGROUND_COLOR)
@@ -1772,35 +2293,73 @@ def run_movement_playtest(
                 pick_list_w = min(520, win_w - 120)
                 list_right = 60 + pick_list_w
                 preview_img = load_detailed_sprite(session_dragon_kind)
+                desc_text = selection_description_for_kind(session_dragon_kind)
+                desc_line_gap = font.get_height() + 4
+                desc_top_gap = 14
+                desc_reserved_h = 88
+
+                def _draw_dragon_selection_description(
+                    text_x: int, text_y: int, max_w: int
+                ) -> None:
+                    if not desc_text:
+                        return
+                    y = text_y
+                    for line in _wrap_text_to_width(font, desc_text, max_w):
+                        if y > win_h - 90:
+                            break
+                        _draw_text(surf, font, line, (text_x, y), _UI_MUTED_TEXT_RGB)
+                        y += desc_line_gap
+
                 if preview_img is not None:
                     slot_x = list_right + 28
                     slot_w = win_w - slot_x - 28
                     if slot_w >= 120:
-                        slot_h = min(280, win_h - y0 - 40)
-                        portrait = scaled_to_fit(preview_img, slot_w, max(80, slot_h))
+                        column_h = win_h - y0 - 50
+                        portrait_max_h = max(
+                            80, column_h - desc_reserved_h - desc_top_gap
+                        )
+                        portrait = scaled_to_fit(preview_img, slot_w, portrait_max_h)
                         surf.blit(portrait, (slot_x, y0))
+                        _draw_dragon_selection_description(
+                            slot_x,
+                            y0 + portrait.get_height() + desc_top_gap,
+                            slot_w,
+                        )
                     else:
                         below_y = btn_play.bottom + 20
-                        slot_h = min(200, win_h - below_y - 90)
-                        if slot_h >= 72:
-                            portrait = scaled_to_fit(preview_img, pick_list_w, slot_h)
+                        column_h = win_h - below_y - 90
+                        portrait_max_h = max(
+                            72, column_h - desc_reserved_h - desc_top_gap
+                        )
+                        if portrait_max_h >= 72:
+                            portrait = scaled_to_fit(
+                                preview_img, pick_list_w, portrait_max_h
+                            )
                             surf.blit(portrait, (60, below_y))
+                            _draw_dragon_selection_description(
+                                60,
+                                below_y + portrait.get_height() + desc_top_gap,
+                                pick_list_w,
+                            )
 
                 if new_game_status:
                     _draw_text(surf, font, new_game_status, (60, win_h - 110), (240, 120, 120))
 
             elif screen == "game" and game_map is not None and dragon is not None:
                 assert citadel_coord is not None
-                caption = font.render(
-                    (
-                        f"Day {day_index}  |  Gold {dragon.gold}  |  "
-                        f"{display_name_for_kind(dragon.kind)}  |  "
-                        "Green bar = hours left  |  Muted = unreachable  |  "
-                        "Right-click: inspect  |  Citadel: upgrades then next day"
-                    ),
-                    True,
-                    (210, 210, 220),
-                )
+                caption_bits = [
+                    f"Day {day_index}",
+                    f"Gold {dragon.gold}",
+                    f"Citadel HP {citadel_hp}/{CITADEL_STARTING_HP}",
+                    display_name_for_kind(dragon.kind),
+                    "Green bar = hours left",
+                    "Muted = unreachable",
+                    "Right-click: inspect",
+                    "Citadel: upgrades then next day",
+                ]
+                if game_over:
+                    caption_bits.insert(3, "GAME OVER")
+                caption = font.render("  |  ".join(caption_bits), True, (210, 210, 220))
                 surf.blit(caption, (8, 6))
                 _draw_hour_bar(surf, dragon.hours_remaining, win_w)
 
@@ -1823,6 +2382,7 @@ def run_movement_playtest(
                     tile_color=tile_color,
                     clear_background=False,
                 )
+                _draw_army_markers_on_map(surf, active_armies, hex_size, origin)
 
                 cx, cy = _dragon_screen_center(dragon.position, hex_size, origin)
                 marker_side = int(max(8, min(hex_size * 1.35, hex_size * 1.55) * 2))
@@ -1841,13 +2401,24 @@ def run_movement_playtest(
                 surf.set_clip(clip_prev)
 
                 dragon_panel_rect = pygame.Rect(0, TIME_BAR_HEIGHT, dragon_panel_w, map_area_h)
-                dragon_ability_button_rects = _draw_dragon_panel(
+                panel_viewport_h = max(1, dragon_panel_rect.h - 24)
+                dragon_ability_button_rects, dragon_panel_content_h = _draw_dragon_panel(
                     surf,
                     font,
                     font_small,
                     panel_rect=dragon_panel_rect,
                     dragon=dragon,
                     world=game_map,
+                    scroll_y=dragon_panel_scroll,
+                )
+                dragon_panel_scroll = _clamp_panel_scroll(
+                    dragon_panel_scroll, dragon_panel_content_h, panel_viewport_h
+                )
+                _draw_panel_scrollbar(
+                    surf,
+                    dragon_panel_rect,
+                    scroll_y=dragon_panel_scroll,
+                    content_height=dragon_panel_content_h,
                 )
 
                 panel_rect = pygame.Rect(
@@ -1856,17 +2427,36 @@ def run_movement_playtest(
                     inspector_panel_w,
                     map_area_h,
                 )
-                inspector_raid_button_rect = _draw_tile_inspector_panel(
+                armies_on_map = _armies_by_coord(active_armies)
+                (
+                    inspector_raid_button_rect,
+                    inspector_army_attack_button_rect,
+                    inspector_panel_content_h,
+                ) = _draw_tile_inspector_panel(
                     surf,
                     font,
                     font_small,
                     panel_rect=panel_rect,
                     game_map=game_map,
                     settlements_by_coord=settlements_by_coord,
+                    armies_by_coord=armies_on_map,
                     inspector_focus_coord=inspector_focus_coord,
                     inspector_message=inspector_message,
                     dragon=dragon,
+                    citadel_coord=citadel_coord,
                     raid_combat_active=raid_combat_settlement is not None,
+                    army_combat_active=army_combat_target is not None,
+                    game_over=game_over,
+                    scroll_y=inspector_panel_scroll,
+                )
+                inspector_panel_scroll = _clamp_panel_scroll(
+                    inspector_panel_scroll, inspector_panel_content_h, panel_viewport_h
+                )
+                _draw_panel_scrollbar(
+                    surf,
+                    panel_rect,
+                    scroll_y=inspector_panel_scroll,
+                    content_height=inspector_panel_content_h,
                 )
 
                 if raid_combat_settlement is not None:
@@ -1882,6 +2472,37 @@ def run_movement_playtest(
                 else:
                     raid_overlay_attack_rect = None
                     raid_overlay_retreat_rect = None
+
+                if army_combat_target is not None:
+                    army_overlay_attack_rect, army_overlay_retreat_rect = _draw_army_combat_overlay(
+                        surf,
+                        font,
+                        font_small,
+                        map_viewport=map_viewport,
+                        dragon=dragon,
+                        army=army_combat_target,
+                        banner=army_overlay_banner,
+                    )
+                else:
+                    army_overlay_attack_rect = None
+                    army_overlay_retreat_rect = None
+
+                if game_over:
+                    go_shade = pygame.Surface((map_viewport.w, map_viewport.h), pygame.SRCALPHA)
+                    go_shade.fill((24, 12, 36, 210))
+                    surf.blit(go_shade, map_viewport.topleft)
+                    go_msg = font_mid.render(
+                        "Game over — the citadel has fallen.",
+                        True,
+                        (240, 180, 220),
+                    )
+                    surf.blit(
+                        go_msg,
+                        (
+                            map_viewport.centerx - go_msg.get_width() // 2,
+                            map_viewport.centery - go_msg.get_height() // 2,
+                        ),
+                    )
 
                 if targeting_ability_name is not None:
                     mx_t, my_t = pygame.mouse.get_pos()
@@ -2186,6 +2807,40 @@ def run_movement_playtest(
                     redraw()
                     continue
 
+                if (
+                    event.type == pygame.MOUSEWHEEL
+                    and screen == "game"
+                    and game_map is not None
+                    and dragon is not None
+                ):
+                    mx_w, my_w = pygame.mouse.get_pos()
+                    map_row_h = win_h - TIME_BAR_HEIGHT - SETTINGS_BAR_HEIGHT
+                    dragon_panel_rect = pygame.Rect(0, TIME_BAR_HEIGHT, dragon_panel_w, map_row_h)
+                    inspector_panel_rect = pygame.Rect(
+                        win_w - inspector_panel_w,
+                        TIME_BAR_HEIGHT,
+                        inspector_panel_w,
+                        map_row_h,
+                    )
+                    wheel_step = event.y * 24
+                    panel_viewport_h = max(1, map_row_h - 24)
+                    if dragon_panel_rect.collidepoint(mx_w, my_w):
+                        dragon_panel_scroll = _clamp_panel_scroll(
+                            dragon_panel_scroll - wheel_step,
+                            dragon_panel_content_h,
+                            panel_viewport_h,
+                        )
+                        redraw()
+                        continue
+                    if inspector_panel_rect.collidepoint(mx_w, my_w):
+                        inspector_panel_scroll = _clamp_panel_scroll(
+                            inspector_panel_scroll - wheel_step,
+                            inspector_panel_content_h,
+                            panel_viewport_h,
+                        )
+                        redraw()
+                        continue
+
                 if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     splitter_drag = None
 
@@ -2290,13 +2945,16 @@ def run_movement_playtest(
                             TIME_BAR_HEIGHT <= my_r <= win_h - SETTINGS_BAR_HEIGHT
                             and map_left <= mx_r < map_right_excl
                         ):
-                            inspector_focus_coord = _pick_tile_at_pixel(
+                            picked = _pick_tile_at_pixel(
                                 float(mx_r),
                                 float(my_r),
                                 gmap_rc,
                                 hex_size,
                                 origin,
                             )
+                            if picked != inspector_focus_coord:
+                                inspector_panel_scroll = 0
+                            inspector_focus_coord = picked
                             inspector_message = ""
                             redraw()
                     continue
@@ -2429,6 +3087,27 @@ def run_movement_playtest(
                                     day_index += 1
                                     for ent in settlements_by_coord.values():
                                         ent.on_settlement_phase_end()
+                                    active_armies, citadel_hp, phase_msgs, phase_over = (
+                                        _run_end_of_day_army_phase(
+                                            gmap,
+                                            active_armies,
+                                            citadel_coord=ccd,
+                                            citadel_hp=citadel_hp,
+                                        )
+                                    )
+                                    active_armies = _prune_defeated_armies(active_armies)
+                                    if phase_over or citadel_hp <= 0:
+                                        citadel_hp = max(0, citadel_hp)
+                                        game_over = True
+                                        inspector_message = (
+                                            "Game over — the citadel has fallen."
+                                        )
+                                    elif phase_msgs:
+                                        inspector_message = phase_msgs[-1]
+                                    elif citadel_hp < CITADEL_STARTING_HP:
+                                        inspector_message = (
+                                            f"Citadel struck! HP {citadel_hp}/{CITADEL_STARTING_HP}."
+                                        )
                                     redraw()
                                     continue
                                 for st, rr in clk.cost.items():
@@ -2474,10 +3153,15 @@ def run_movement_playtest(
                         in_map_column = map_left <= mx < map_right_excl
                         in_map_row = map_row_top <= my <= map_row_bottom
 
+                        if game_over:
+                            redraw()
+                            continue
+
                         if (
                             map_row_top <= my <= map_row_bottom
                             and mx < dragon_panel_w
                             and raid_combat_settlement is None
+                            and army_combat_target is None
                         ):
                             for ability_name, rect in dragon_ability_button_rects.items():
                                 if rect.collidepoint(mx, my):
@@ -2528,6 +3212,62 @@ def run_movement_playtest(
                             redraw()
                             continue
 
+                        if army_combat_target is not None:
+                            if (
+                                army_overlay_retreat_rect is not None
+                                and army_overlay_retreat_rect.collidepoint(mx, my)
+                            ):
+                                on_combat_ended(dgn)
+                                army_combat_target = None
+                                army_overlay_banner = ""
+                                army_overlay_auto_close_deadline_ms = None
+                                redraw()
+                                continue
+                            if (
+                                army_overlay_attack_rect is not None
+                                and army_overlay_attack_rect.collidepoint(mx, my)
+                            ):
+                                target_army = army_combat_target
+                                if _army_hp(target_army) <= 0 or dgn.hp <= 0:
+                                    redraw()
+                                    continue
+                                exchange = _resolve_army_combat_round(
+                                    dgn,
+                                    target_army,
+                                    gmap,
+                                    citadel_coord=ccd,
+                                )
+                                if isinstance(exchange, MoveAttempt):
+                                    on_combat_ended(dgn)
+                                    army_overlay_banner = exchange.reason
+                                    army_combat_target = None
+                                    army_overlay_auto_close_deadline_ms = None
+                                    inspector_message = exchange.reason
+                                    redraw()
+                                    continue
+
+                                if _army_hp(target_army) <= 0:
+                                    on_combat_ended(dgn)
+                                    active_armies[:] = _prune_defeated_armies(active_armies)
+                                    dname = display_name_for_kind(dgn.kind)
+                                    army_overlay_banner = f"{dname} destroyed the army."
+                                    army_overlay_auto_close_deadline_ms = (
+                                        pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
+                                    )
+                                elif dgn.hp <= 0:
+                                    on_combat_ended(dgn)
+                                    army_overlay_banner = "Your dragon was defeated."
+                                    army_overlay_auto_close_deadline_ms = (
+                                        pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
+                                    )
+                                else:
+                                    army_overlay_banner = ""
+                                redraw()
+                                continue
+                            if in_map_row and in_map_column:
+                                redraw()
+                                continue
+
                         if raid_combat_settlement is not None:
                             if (
                                 raid_overlay_retreat_rect is not None
@@ -2564,16 +3304,23 @@ def run_movement_playtest(
 
                                 if target.hp <= 0:
                                     on_combat_ended(dgn)
-                                    gold_added, _events = apply_settlement_raid_victory_bundle(
+                                    gold_added, spawn_events = apply_settlement_raid_victory_bundle(
                                         dgn,
                                         target,
                                         list(settlements_by_coord.values()),
                                         map_width=gmap.width,
                                     )
+                                    spawned = _spawn_armies_from_events(
+                                        list(spawn_events),
+                                        settlements_by_coord=settlements_by_coord,
+                                        active_armies=active_armies,
+                                    )
                                     dname = display_name_for_kind(dgn.kind)
                                     raid_overlay_banner = (
                                         f"{dname} won and gained {gold_added} gold"
                                     )
+                                    if spawned:
+                                        raid_overlay_banner += f"; {spawned} army mobilized"
                                     raid_overlay_auto_close_deadline_ms = (
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
                                     )
@@ -2609,6 +3356,27 @@ def run_movement_playtest(
                                         inspector_message = ""
                                     else:
                                         inspector_message = reason
+                            if (
+                                inspector_army_attack_button_rect is not None
+                                and inspector_army_attack_button_rect.collidepoint(mx, my)
+                                and inspector_focus_coord is not None
+                            ):
+                                target_army = _armies_by_coord(active_armies).get(
+                                    inspector_focus_coord
+                                )
+                                if target_army is not None:
+                                    ok_army, reason_army = _validate_dragon_vs_army(
+                                        dgn,
+                                        target_army,
+                                        citadel_coord=ccd,
+                                    )
+                                    if ok_army:
+                                        army_combat_target = target_army
+                                        army_overlay_banner = ""
+                                        army_overlay_auto_close_deadline_ms = None
+                                        inspector_message = ""
+                                    else:
+                                        inspector_message = reason_army
                             redraw()
                             continue
 
@@ -2880,6 +3648,16 @@ def run_movement_playtest(
                 raid_combat_settlement = None
                 raid_overlay_banner = ""
                 raid_overlay_auto_close_deadline_ms = None
+                redraw()
+
+            if (
+                screen == "game"
+                and army_overlay_auto_close_deadline_ms is not None
+                and pygame.time.get_ticks() >= army_overlay_auto_close_deadline_ms
+            ):
+                army_combat_target = None
+                army_overlay_banner = ""
+                army_overlay_auto_close_deadline_ms = None
                 redraw()
 
             clock.tick(_FRAME_RATE)

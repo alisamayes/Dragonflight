@@ -50,7 +50,7 @@ The map file is a single JSON object with the following keys.
 
 The runtime only consumes `width`, `height`, and `orientation`. Other keys are
 editor display preferences and are tolerated but ignored. The aggression
-nearby-radius default of 15% of map width (per spec §6) uses `settings.width`
+nearby-radius default of 30% of map width (per spec §6 dev tweak) uses `settings.width`
 as the reference dimension.
 
 ## 3. `hexes` map and per-tile shape

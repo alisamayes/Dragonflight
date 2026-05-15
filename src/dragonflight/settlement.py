@@ -12,6 +12,7 @@ from .hex_coord import OffsetCoord, distance, offset_to_axial
 from .terrain import Terrain
 
 if TYPE_CHECKING:
+    from .army import Army
     from .map_state import GameMap
 
 
@@ -29,7 +30,7 @@ RAID_STAT_LOSS: int = 10
 RAID_VICTORY_GOLD_PERCENT_OF_ECO: int = 50
 RAID_DIRECT_AGGRESSION: int = 300
 RAID_NEARBY_AGGRESSION: int = 150
-DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT: int = 15
+DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT: int = 30
 
 
 class SettlementType(Enum):
@@ -38,6 +39,17 @@ class SettlementType(Enum):
     VILLAGE = "village"
     CITY = "city"
     FORT = "fort"
+
+
+@dataclass(frozen=True, slots=True)
+class MockArmySpawnEvent:
+    """Deprecated playtest type; aggression spawns return :class:`~dragonflight.army.Army` now."""
+
+    position: OffsetCoord
+    settlement_type: SettlementType
+    eco: int
+    atk: int
+    dfn: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,24 +65,13 @@ class SettlementPhaseOutcome:
 
 
 @dataclass(frozen=True, slots=True)
-class MockArmySpawnEvent:
-    """MVP stand-in for army creation when aggression crosses its threshold."""
-
-    position: OffsetCoord
-    settlement_type: SettlementType
-    eco: int
-    atk: int
-    dfn: int
-
-
-@dataclass(frozen=True, slots=True)
 class SettlementCombatLoopResult:
     """Outcome from resolving settlement combat until defeat, dragon loss, or retreat."""
 
     rounds_resolved: int
     retreated: bool
     exchanges: tuple[DamageRoundExchange, ...]
-    spawn_events: tuple[MockArmySpawnEvent, ...] = ()
+    spawn_events: tuple[Army, ...] = ()
     last_failure: MoveAttempt | None = None
 
 
@@ -83,7 +84,7 @@ class SettlementRaidResolution:
 
 
 def nearby_aggression_radius(map_width: int) -> int:
-    """Return the default nearby-spill radius: rounded 15% of map width."""
+    """Return the default nearby-spill radius: rounded 30% of map width."""
 
     return round(map_width * DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT / 100)
 
@@ -191,26 +192,22 @@ class Settlement:
 
         return resolve_settlement_combat_round(dragon, self, world, citadel_coord=citadel_coord)
 
-    def add_aggression(self, amount: int) -> MockArmySpawnEvent | None:
-        """Add local aggression, spawning a mock army if the threshold is reached."""
+    def add_aggression(self, amount: int) -> Army | None:
+        """Add local aggression, spawning an army if the threshold is reached."""
 
         self.aggression += max(0, amount)
         return self.check_aggression_threshold()
 
-    def check_aggression_threshold(self) -> MockArmySpawnEvent | None:
-        """Spawn a mock army and reset aggression when the threshold is met."""
+    def check_aggression_threshold(self) -> Army | None:
+        """Spawn an army and reset aggression when the threshold is met (spec §9)."""
 
         if self.aggression < self.aggression_threshold:
             return None
 
         self.aggression = 0
-        return MockArmySpawnEvent(
-            position=self.position,
-            settlement_type=self.settlement_type,
-            eco=self.eco,
-            atk=self.atk,
-            dfn=self.dfn,
-        )
+        from .army import Army
+
+        return Army.spawn_from_settlement(self)
 
     def spill_aggression_to_nearby(
         self,
@@ -218,11 +215,11 @@ class Settlement:
         *,
         map_width: int,
         radius: int | None = None,
-    ) -> list[MockArmySpawnEvent]:
-        """Apply nearby aggression spillover and return any mock spawn events."""
+    ) -> list[Army]:
+        """Apply nearby aggression spillover and return any spawned armies."""
 
         spill_radius = nearby_aggression_radius(map_width) if radius is None else radius
-        events: list[MockArmySpawnEvent] = []
+        events: list[Army] = []
         for settlement in settlements:
             if settlement is self:
                 continue
@@ -238,14 +235,14 @@ class Settlement:
         *,
         map_width: int,
         radius: int | None = None,
-    ) -> list[MockArmySpawnEvent]:
+    ) -> list[Army]:
         """Apply the raid-defeat bundle after this settlement reaches 0 HP."""
 
         self.eco //= RAID_ECO_LOSS_DIVISOR
         self.atk = max(0, self.atk - RAID_STAT_LOSS)
         self.dfn = max(0, self.dfn - RAID_STAT_LOSS)
 
-        events: list[MockArmySpawnEvent] = []
+        events: list[Army] = []
         direct_event = self.add_aggression(RAID_DIRECT_AGGRESSION)
         if direct_event is not None:
             events.append(direct_event)
@@ -333,7 +330,7 @@ def apply_settlement_raid_victory_bundle(
     settlements: Iterable[Settlement],
     *,
     map_width: int,
-) -> tuple[int, list[MockArmySpawnEvent]]:
+) -> tuple[int, list[Army]]:
     """After combat reduces settlement HP to 0: grant gold, then apply raid-defeat effects.
 
     Returns ``(gold_granted_this_step, spawn_events)`` for UI messaging.
@@ -419,7 +416,7 @@ def run_settlement_combat_loop(
 
     rounds = 0
     exchanges: list[DamageRoundExchange] = []
-    spawn_events: list[MockArmySpawnEvent] = []
+    spawn_events: list[Army] = []
 
     while True:
         exchange = resolve_settlement_combat_round(

@@ -9,10 +9,10 @@ import pytest
 from dragonflight.dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
+from dragonflight.army import Army
 from dragonflight.settlement import (
     City,
     Fort,
-    MockArmySpawnEvent,
     Settlement,
     SettlementType,
     Village,
@@ -266,8 +266,8 @@ class TestSettlementCombat:
         assert settlement.atk == 80
         assert settlement.dfn == 110
         assert result.spawn_events == (
-            MockArmySpawnEvent(OffsetCoord(0, 0), SettlementType.FORT, 50, 80, 110),
-            MockArmySpawnEvent(OffsetCoord(1, 0), SettlementType.VILLAGE, 500, 60, 40),
+            Army.spawn_from_settlement(settlement),
+            Army.spawn_from_settlement(nearby),
         )
         assert settlement.aggression == 0
         assert nearby.aggression == 0
@@ -306,24 +306,24 @@ class TestRaidDefeat:
     def test_raid_defeat_halves_eco_reduces_power_and_spills_nearby_aggression(self) -> None:
         defeated = City(OffsetCoord(0, 0))
         nearby = Village(OffsetCoord(2, 0))
-        outside = Fort(OffsetCoord(3, 0))
+        outside = Fort(OffsetCoord(4, 0))
         settlements = [defeated, nearby, outside]
 
         events = defeated.on_raid_defeat(settlements, map_width=10)
 
-        assert nearby_aggression_radius(10) == 2
+        assert nearby_aggression_radius(10) == 3
         assert events == []
         assert defeated.eco == 500
-        assert defeated.atk == 90
-        assert defeated.dfn == 90
+        assert defeated.atk == 60
+        assert defeated.dfn == 70
         assert defeated.aggression == 300
         assert nearby.aggression == 150
         assert outside.aggression == 0
 
-    def test_threshold_mock_spawn_resets_aggression(self) -> None:
+    def test_threshold_spawn_resets_aggression(self) -> None:
         fort = Fort(OffsetCoord(4, 4), aggression=250)
 
-        event = fort.add_aggression(50)
+        army = fort.add_aggression(50)
 
-        assert event == MockArmySpawnEvent(OffsetCoord(4, 4), SettlementType.FORT, 100, 90, 120)
+        assert army == Army.spawn_from_settlement(fort)
         assert fort.aggression == 0

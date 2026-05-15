@@ -243,7 +243,7 @@ Nearby settlements:
 
 ### Nearby aggression radius (configurable)
 - At game start (settings / new-game options), the player may configure how far “nearby” extends (for spreading aggression from attacks)
-- **Default:** nearby settlements are those within a hex radius equal to **15% of map width**, rounded as implemented (example: width 100 hexes → radius 15 hexes)
+- **Default:** nearby settlements are those within a hex radius equal to **30% of map width**, rounded as implemented (example: width 100 hexes → radius 30 hexes; dev tweak from spec 15%)
 - Use **map width** as the reference dimension for this default unless later changed for specific map shapes
 
 If aggression exceeds threshold:
@@ -406,6 +406,13 @@ Suggested MVP stats:
 - Movement speed
 - Position
 
+## Army Starting Stats:
+- HP = 66% of spawning settlements max hp
+- Attack = 90% of spawning settlements attack
+- Defence = 50% of spawning settlements defence
+- Movement speed = 8
+- Position = Same as spawning settlement
+
 ---
 
 # 10. Citadel System
@@ -428,6 +435,7 @@ The citadel:
 - Associated dragon healing at end of day follows Citadel Phase rules (Section 2)
 
 No citadel upgrades exist in MVP.
+For initial developement a citadel will have 3 HP and each time it is attacked by an army it loses one. If it reaches 0 its game over
 
 ---
 
@@ -584,20 +592,19 @@ The following are intentionally excluded from the MVP:
 Potential future systems:
 - Procedural map generation
 - Fog of war
-- Multiple dragon species
 - Elemental damage
 - Citadel upgrades
-- Hero enemies
+- Hero enemies/ unit diversity
 - Flying units
 - Seasonal systems
 - Settlement factions
-- Diplomacy
 - Dynamic world events
 - Save/load support
 - Roguelite progression
-- Dragon abilities
-- AI improvements
-- Dynamic economy
+- More dragon abilities and/or branching
+- More dragon species
+- Graphics overhaul
+- Additional art 
 
 ---
 

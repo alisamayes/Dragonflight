@@ -1,4 +1,4 @@
-# Finish making army combat
+# Finish making army combat — done
 # Fix purplegons breath targeting
 # Cleanup purplegon art
 # clean up HUD wording/ description

@@ -20,6 +20,7 @@ from dragonflight.movement_playtest import (
     INSPECTOR_PANEL_MIN_WIDTH_SCALE_NUM,
     SETTINGS_BAR_HEIGHT,
     TIME_BAR_HEIGHT,
+    _clamp_panel_scroll,
     _inspector_panel_raw_min_column_width,
     _map_viewport_rect,
     _min_dragon_panel_column_width,
@@ -173,6 +174,13 @@ def test_hit_test_splitter_respects_halfwidth() -> None:
         )
         is None
     )
+
+
+def test_clamp_panel_scroll_bounds() -> None:
+    assert _clamp_panel_scroll(0, 100, 80) == 0
+    assert _clamp_panel_scroll(50, 100, 80) == 20
+    assert _clamp_panel_scroll(999, 100, 80) == 20
+    assert _clamp_panel_scroll(10, 50, 80) == 0
 
 
 def test_gameplay_floor_constants_sane() -> None:
