@@ -16,7 +16,7 @@ Coordinate convention (round Wave-2-revision-1 amendment):
   these values; no axial conversion happens during load. Pathfinding and
   distance code that needs axial calls ``hex_coord.offset_to_axial`` itself.
 
-Resolution rules (spec §5; ``Documentation/map-schema.md`` §5-§7):
+Resolution rules (spec num5; ``Documentation/map-schema.md`` num5-num7):
 
 1. ``hexType`` matching a recognised built-in (``grassland``, ``forest``,
    ``mountain``) maps directly to a ``Terrain`` value.
@@ -54,7 +54,7 @@ from .terrain import Terrain
 
 #: Lowest schemaVersion supported by this loader. The Slice 1 vocabulary
 #: (Bridge / Citadel / Settlement / River as customHexTypes; ocean retired)
-#: was introduced at schemaVersion 3 — see Documentation/map-schema.md §10.
+#: was introduced at schemaVersion 3 — see Documentation/map-schema.md num10.
 _MIN_SCHEMA_VERSION: int = 3
 
 #: Upper bound on accepted ``schemaVersion``. Lower bound is enforced by the
@@ -120,7 +120,7 @@ _CUSTOM_NAME_TO_TERRAIN: dict[str, Terrain] = {
     "river": Terrain.RIVER,
 }
 
-#: Per-tile ``settlementType`` JSON strings (lowercase) → enum (schema §3 extension).
+#: Per-tile ``settlementType`` JSON strings (lowercase) → enum (schema num3 extension).
 _SETTLEMENT_TYPE_JSON: dict[str, SettlementType] = {
     "village": SettlementType.VILLAGE,
     "city": SettlementType.CITY,
@@ -333,8 +333,8 @@ def _resolve_terrain(
 ) -> Terrain:
     """Resolve a tile's ``hexType`` string to a ``Terrain`` value.
 
-    Implements the rule documented in this module's docstring (spec §5;
-    ``map-schema.md`` §5-§7). Errors include the offending coordinate so
+    Implements the rule documented in this module's docstring (spec num5;
+    ``map-schema.md`` num5-num7). Errors include the offending coordinate so
     map authors can find the bad tile fast.
     """
     if hex_type in _BUILT_IN_TERRAIN:

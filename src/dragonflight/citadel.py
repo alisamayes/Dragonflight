@@ -1,4 +1,4 @@
-"""Citadel defence state for army-phase attacks (spec §§2, 10)."""
+"""Citadel defence state for army-phase attacks (spec numnum2, 10)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class CitadelState:
     hp: int = DEFAULT_CITADEL_HP
 
     def apply_army_attack(self) -> None:
-        """Reduce HP by one per attacking army stack (spec §10)."""
+        """Reduce HP by one per attacking army stack (spec num10)."""
 
         self.hp = max(0, self.hp - CITADEL_HP_LOSS_PER_ARMY_ATTACK)
 

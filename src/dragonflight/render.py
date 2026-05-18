@@ -1,6 +1,6 @@
 """Slice 1 hex-map renderer (Pygame).
 
-Pure presentation layer for the "see the map" slice (spec §4 Perspective bullet:
+Pure presentation layer for the "see the map" slice (spec num4 Perspective bullet:
 "Initial development should just use coloured hexs"). The renderer reads a
 :class:`~dragonflight.map_state.GameMap` and draws each tile as a flat-top
 hex polygon filled with a per-terrain colour.
@@ -19,7 +19,7 @@ Architectural rules (locked by Architectural Lead):
 
 * The colour table lives here, not in ``terrain``. ``terrain`` is the simulation's
   identity table; rendering palette is presentation policy.
-* The renderer **never mutates** ``GameMap`` (single source of truth — spec §13/§19).
+* The renderer **never mutates** ``GameMap`` (single source of truth — spec num13/num19).
 * No simulation rule logic in this module (no aggression, no movement, no combat).
 * Hex math comes from ``hex_coord`` (``offset_to_pixel`` / ``hex_corner_offset``);
   this module never re-derives those formulas locally.
@@ -43,7 +43,7 @@ from .terrain import Terrain
 #: roughly match the design-intent ``customColors`` recorded in
 #: ``assets/example_hexmap.json`` (River #3a7bd5, Bridge #8B4513, Settlement
 #: #fff705, Citadel #e31616). Built-in terrains (grassland, woodland, mountain)
-#: pick readable defaults until art lands per spec §4 Perspective bullet.
+#: pick readable defaults until art lands per spec num4 Perspective bullet.
 TERRAIN_COLORS: dict[Terrain, tuple[int, int, int]] = {
     Terrain.GRASSLAND: (138, 191, 96),
     Terrain.WOODLAND: (49, 110, 50),

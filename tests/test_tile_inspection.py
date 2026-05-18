@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
+from dragonflight.army import Army, ArmyKind
 from dragonflight.movement_playtest import _PlaytestArmy
 from dragonflight.settlement import Village
 from dragonflight.terrain import Terrain
@@ -112,12 +113,50 @@ def test_tile_inspector_lines_include_army_block() -> None:
         orientation="flat",
         tiles={coord: Tile(coord=coord, terrain=Terrain.GRASSLAND)},
     )
-    army = _PlaytestArmy(position=coord, hp=100, max_hp=100, atk=10, dfn=5)
+    army = _PlaytestArmy(
+        position=coord,
+        hp=100,
+        max_hp=100,
+        atk=10,
+        dfn=5,
+        victory_gold=42,
+    )
     info = tile_inspect_info(game_map, coord, {}, armies_by_coord={coord: army})
     assert info is not None
+    assert info.army is not None
+    assert info.army.destroy_payout == 42
     lines = tile_inspector_lines(info)
     assert any(ln.kind == "army" for ln in lines)
-    assert any("Army" in ln.text for ln in lines)
+    assert any(ln.text == "Army" for ln in lines)
+    assert any(ln.text == "Destroy payout: 42" for ln in lines)
+
+
+def test_tile_inspector_lines_heroes_party_title() -> None:
+    coord = OffsetCoord(2, 2)
+    game_map = GameMap(
+        width=5,
+        height=5,
+        hex_size=30.0,
+        orientation="flat",
+        tiles={coord: Tile(coord=coord, terrain=Terrain.GRASSLAND)},
+    )
+    army = Army(
+        hp=100,
+        max_hp=100,
+        atk=10,
+        dfn=5,
+        movement_speed=8,
+        position=coord,
+        kind=ArmyKind.HEROES_PARTY,
+        victory_gold=75,
+    )
+    info = tile_inspect_info(game_map, coord, {}, armies_by_coord={coord: army})
+    assert info is not None
+    assert info.army is not None
+    assert info.army.display_name == "Hero's Party"
+    lines = tile_inspector_lines(info)
+    assert any(ln.text == "Hero's Party" for ln in lines)
+    assert any(ln.text == "Destroy payout: 75" for ln in lines)
 
 
 def test_army_inspect_info_ignores_defeated_army() -> None:

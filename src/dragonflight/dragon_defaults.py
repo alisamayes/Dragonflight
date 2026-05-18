@@ -1,4 +1,4 @@
-"""Named default baselines for dragon tuning (spec §7; balance is provisional).
+"""Named default baselines for dragon tuning (spec num7; balance is provisional).
 
 Centralise MVP placeholders here so gameplay code does not scatter magic numbers.
 Tune values during balancing without hunting literals across modules.
@@ -10,13 +10,13 @@ from __future__ import annotations
 HOURS_PER_DRAGON_DAY: float = 24.0
 
 #: When the dragon ends the day at the citadel, heal this percent of :attr:`~dragon.Dragon.max_hp`
-#: before the hourly bonus (spec §2 Citadel Phase).
+#: before the hourly bonus (spec num2 Citadel Phase).
 DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX: int = 50
 #: Additional percent of ``max_hp`` healed per **hour** still remaining on the clock when docking
 #: (rewards early return without wasting the day budget).
 DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING: int = 2
 
-#: Each discrete combat damage round consumes 30 minutes of the dragon daily budget (spec §8).
+#: Each discrete combat damage round consumes 30 minutes of the dragon daily budget (spec num8).
 MINUTES_PER_DAMAGE_ROUND: int = 30
 
 #: Fractional-hour form of :data:`MINUTES_PER_DAMAGE_ROUND` for time accounting.
@@ -35,7 +35,7 @@ DEFAULT_DRAGON_DFN: int = 10
 DEFAULT_DRAGON_FLIGHT_RANGE_HEXES: int = 10
 DEFAULT_DRAGON_SPEED_HEXES_PER_HOUR: float = 10.0
 
-# --- Dragon stat shop (spec §7; end-of-day draft at citadel hub) -----------------
+# --- Dragon stat shop (spec num7; end-of-day draft at citadel hub) -----------------
 
 #: Flat gold component in ``200 + level*20 + n*20``.
 DRAGON_STAT_UPGRADE_COST_BASE: int = 200

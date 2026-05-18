@@ -6,7 +6,7 @@ Two coordinate spaces coexist here, with a clear separation of concerns:
   bundled map editor's JSON, by ``map_state.Tile.coord``, and by the renderer's
   visual layout. Adjacent odd columns are shifted down by half a hex; this is
   what makes a ``width × height`` map render as a square instead of a rhombus.
-* **Axial (``q``/``r``)** — the **math identity** used by spec §4 / §14 for
+* **Axial (``q``/``r``)** — the **math identity** used by spec num4 / num14 for
   distance, neighbour walks, and pathfinding. Slice 1 has no math consumers
   yet, but the primitives are kept stable so future systems pick them up
   unchanged.

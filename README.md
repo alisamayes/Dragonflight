@@ -4,9 +4,11 @@ Turn-based dragon raiding strategy game (MVP, Python + Pygame).
 
 ## Status / scope
 
-Current development slice is **Slice 1 — "See the map"**: a Pygame window
-parses the bundled example map and renders it as flat-top coloured hexes. No
-gameplay rules (movement, combat, economy) are wired up yet.
+The default client (`python -m dragonflight`) is an interactive **movement
+playtest**: main menu, map and dragon selection, then a three-column session
+with dragon movement, combat previews, settlements, and related prototype
+systems. A static map-only preview remains available via
+`render.run_demo` (see package docs).
 
 For the full design, see
 [`Documentation/Dragonflight Specification and MVP.md`](Documentation/Dragonflight%20Specification%20and%20MVP.md).
@@ -15,7 +17,7 @@ For the full design, see
 
 | Path | Contents |
 | --- | --- |
-| `src/dragonflight/` | The `dragonflight` package: hex math, terrain enum, map state, JSON loader, renderer, and the `python -m dragonflight` entry point. |
+| `src/dragonflight/` | The `dragonflight` package: hex math, map/simulation modules, JSON loader, renderer, map viewport camera (`map_camera`), movement playtest UI, and the `python -m dragonflight` entry point. |
 | `assets/` | Map data files. Currently holds `example_hexmap.json`. |
 | `tests/` | Pytest suite (loader, hex math, render sizing). |
 | `Documentation/` | Spec and schema docs. |
@@ -47,7 +49,7 @@ the venv stays active in your prompt:
 If you prefer a non-PowerShell prompt, double-click `scripts\Open-DragonflightDev.cmd`
 to launch a `cmd.exe` shell with the venv activated.
 
-## Run the demo
+## Run the client
 
 Either entry point works — pick whichever feels natural:
 
@@ -59,9 +61,19 @@ python -m dragonflight
 python dragonflight.py
 ```
 
-The demo opens a window that draws the bundled example map
-(`assets/example_hexmap.json`) once as flat-top coloured hexes. It does no
-animation or simulation. Quit by pressing `ESC` or closing the window.
+This opens the main menu, then new-game map and dragon selection, then the
+movement playtest. Quit with `ESC` or by closing the window.
+
+### Map viewport controls (playtest)
+
+While in an active game session, the **central map column** supports:
+
+| Input | Effect |
+| --- | --- |
+| **Mouse wheel** (over the map) | Zoom between **1×** (entire map fits) and **3×**; zoom stays anchored under the cursor. At 1×, pan resets and the map is centered. |
+| **WASD** or **arrow keys** | Pan the map when zoomed past 1× (no effect at full fit). |
+
+Implementation: `src/dragonflight/map_camera.py`, wired from `movement_playtest.py`.
 
 ## Tests + quality gates
 

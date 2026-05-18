@@ -7,6 +7,15 @@ reachable hexes to move the dragon from the citadel. Invalid tiles (flight range
 or mandatory return to citadel on the daily clock) are drawn muted. A 24-segment
 hour bar tracks remaining daylight.
 
+**Map viewport (central column during playtest):**
+
+- **Mouse wheel** or **+ / −** controls (top-right of the map): zoom 1× (fit) to
+  3×; wheel zoom is anchored under the cursor, buttons zoom toward the viewport
+  center. Zooming back to 1× recenters the map and clears pan.
+- **WASD** or **arrow keys**: pan while zoomed past 1× (ignored at full fit).
+
+Camera math lives in :mod:`dragonflight.map_camera`.
+
 This module couples presentation with :class:`~dragonflight.dragon.Dragon` for
 the runnable prototype. A static map-only window is :func:`render.run_demo`.
 """
@@ -14,6 +23,7 @@ the runnable prototype. A static map-only window is :func:`render.run_demo`.
 from __future__ import annotations
 
 import json
+import random
 import re
 import uuid
 from collections.abc import Sequence
@@ -24,7 +34,13 @@ from typing import Any, Literal
 
 import pygame
 
-from .army import Army
+from .army import (
+    Army,
+    ArmyKind,
+    HeroesPartyCityPool,
+    grant_army_victory_loot,
+    spawn_heroes_party_wave,
+)
 from .combat_preview import preview_army_round, preview_settlement_round
 from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from .dragon_abilities import (
@@ -61,9 +77,22 @@ from .dragon_progression import (
     total_dragon_upgrade_draft_cost,
 )
 from .dragon_ui_theme import DragonUITheme, dragon_ui_theme_for_kind
-from .game_tuning import GameTuning, default_game_tuning
+from .game_tuning import (
+    DifficultyLevel,
+    GameTuning,
+    apply_difficulty_preset,
+    default_game_tuning,
+)
 from .hex_coord import HEX_CORNERS, OffsetCoord, offset_to_pixel
 from .hour_bar_layout import hour_bar_segment_layout
+from .map_camera import (
+    MapViewportCamera,
+    apply_keyboard_pan,
+    apply_wheel_zoom,
+    apply_zoom_step,
+    camera_is_pannable,
+    resolve_map_view,
+)
 from .map_loader import MapLoadError, load_map
 from .map_state import GameMap, Tile
 from .render import (
@@ -148,11 +177,12 @@ RAID_COMBAT_OVERLAY_HEIGHT_FRACTION: float = 0.5
 #: After a terminal combat outcome message, auto-close the raid overlay (milliseconds).
 RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS: int = 3000
 
-#: Citadel HP at session start (spec §10 MVP).
+#: Citadel HP at session start (spec num10 MVP).
 CITADEL_STARTING_HP: int = 3
 
 #: Map marker for active armies (drawn under the dragon sprite).
 _ARMY_MARKER_RGB: tuple[int, int, int] = (128, 0, 200)
+_HEROES_ARMY_MARKER_RGB: tuple[int, int, int] = (240, 160, 50)
 
 _UI_BG_RGB: tuple[int, int, int] = (30, 32, 40)
 _UI_PANEL_RGB: tuple[int, int, int] = (38, 41, 52)
@@ -167,6 +197,10 @@ _UI_BUTTON_HOVER_RGB: tuple[int, int, int] = (74, 82, 108)
 _UI_BUTTON_ACTIVE_RGB: tuple[int, int, int] = (96, 106, 140)
 _UI_INPUT_RGB: tuple[int, int, int] = (22, 24, 32)
 _UI_INPUT_FOCUS_RGB: tuple[int, int, int] = (28, 30, 40)
+
+_MAP_ZOOM_BTN_SIZE: int = 28
+_MAP_ZOOM_BTN_MARGIN: int = 8
+_MAP_ZOOM_BTN_GAP: int = 4
 
 _MAP_EDITOR_HEX_OUTLINE: tuple[int, int, int] = (10, 10, 10)
 
@@ -387,38 +421,32 @@ def _draw_button(
     surface.blit(text_surf, (tx, ty))
 
 
-def _game_options_slider_defs() -> tuple[tuple[str, str, int, int], ...]:
+_GAME_OPTIONS_FLOAT_SLIDERS = frozenset({"raid_eco_loss_divisor"})
+_GAME_OPTIONS_FLOAT_STEP = 0.5
+
+
+def _game_options_slider_defs() -> tuple[tuple[str, str, int | float, int | float], ...]:
     """``(GameTuning attribute, label, min, max)`` for Game Options sliders."""
 
     return (
-        ("army_movement_speed", "Army speed", 1, 24),
-        ("nearby_radius_map_width_percent", "Aggro range (% of map width)", 0, 100),
-        ("settlement_growth_eco_percent", "Settlement growth — eco %", 0, 100),
-        ("settlement_growth_stat_bonus", "Settlement growth — ATK / DFN bonus", 0, 50),
-        ("settlement_eco_growth_scale_percent", "Eco growth rate (scale %)", 10, 200),
-        ("raid_eco_loss_divisor", "Raid defeat — eco divisor", 1, 10),
-        ("raid_stat_loss", "Raid defeat — stat loss", 0, 50),
-        ("settlement_heal_percent_of_max_at_zero", "Settlement heal at 0 HP (% of max)", 0, 100),
-        (
-            "settlement_heal_percent_of_max_when_damaged",
-            "Settlement heal when damaged (% of max)",
-            0,
-            100,
-        ),
-        (
-            "dragon_citadel_end_of_day_base_heal_percent_of_max",
-            "End-of-day dragon base heal (% of max HP)",
-            0,
-            100,
-        ),
+        ("army_movement_speed", "Army movement per day", 1, 24),
+        ("nearby_radius_map_width_percent", "Settlement AOE agression radius (% of map width)", 0, 100),
+        ("settlement_growth_eco_percent", "Settlement eco growth, (5% of current eco) + (x% of starting eco)", 0, 100),
+        ("settlement_growth_stat_bonus", "Settlement ATK / DFN growth", 0, 50),
+        ("raid_eco_loss_divisor", "Settlement eco loss on defeat", 1.0, 10.0),
+        ("raid_stat_loss", "Settlement stat loss on defeat (current eco / X)", 0, 50),
+        ("settlement_heal_percent_of_max_at_zero", "Settlement healing when destroyed/ raided (% of max HP)", 0, 100),
+        ("settlement_heal_percent_of_max_when_damaged","Settlement healing when partially damaged (% of max HP)",0,100),
+        ("dragon_citadel_end_of_day_base_heal_percent_of_max", "End-of-day dragon base heal (% of max HP)", 0, 100),
     )
 
 
-def _game_options_slider_value_label(attr: str, value: int) -> str:
+def _game_options_slider_value_label(attr: str, value: int | float) -> str:
+    if attr == "raid_eco_loss_divisor":
+        return f"{value:g}"
     if attr in (
         "nearby_radius_map_width_percent",
         "settlement_growth_eco_percent",
-        "settlement_eco_growth_scale_percent",
         "settlement_heal_percent_of_max_at_zero",
         "settlement_heal_percent_of_max_when_damaged",
         "dragon_citadel_end_of_day_base_heal_percent_of_max",
@@ -432,13 +460,21 @@ def _game_options_set_slider_from_mouse(
     attr: str,
     mouse_x: int,
     track: pygame.Rect,
-    lo: int,
-    hi: int,
+    lo: int | float,
+    hi: int | float,
 ) -> None:
     t = (mouse_x - track.x) / max(1, track.w)
     t = max(0.0, min(1.0, t))
-    v = int(round(lo + t * (hi - lo)))
-    setattr(game_tuning, attr, v)
+    raw = lo + t * (hi - lo)
+    if attr in _GAME_OPTIONS_FLOAT_SLIDERS:
+        step = _GAME_OPTIONS_FLOAT_STEP
+        v = round(raw / step) * step
+        v = max(float(lo), min(float(hi), v))
+        setattr(game_tuning, attr, v)
+    else:
+        v = int(round(raw))
+        v = max(int(lo), min(int(hi), v))
+        setattr(game_tuning, attr, v)
 
 
 def _draw_info_panel_chrome(
@@ -869,6 +905,7 @@ class _PlaytestArmy:
     max_hp: int
     atk: int
     dfn: int
+    victory_gold: int = 0
 
 
 def _try_import_army_sim() -> Any | None:
@@ -886,6 +923,11 @@ def _army_position(army: Any) -> OffsetCoord:
 
 def _army_hp(army: Any) -> int:
     return int(army.hp)
+
+
+def _army_kind(army: Any) -> ArmyKind:
+    kind = getattr(army, "kind", ArmyKind.STANDARD)
+    return kind if isinstance(kind, ArmyKind) else ArmyKind.STANDARD
 
 
 def _set_army_hp(army: Any, hp: int) -> None:
@@ -1048,16 +1090,21 @@ def _draw_army_markers_on_map(
             continue
         cx, cy = _dragon_screen_center(_army_position(army), hex_size, origin)
         icx, icy = int(round(cx)), int(round(cy))
+        marker_rgb = (
+            _HEROES_ARMY_MARKER_RGB
+            if _army_kind(army) == ArmyKind.HEROES_PARTY
+            else _ARMY_MARKER_RGB
+        )
         pygame.draw.line(
             surface,
-            _ARMY_MARKER_RGB,
+            marker_rgb,
             (icx - half, icy - half),
             (icx + half, icy + half),
             line_w,
         )
         pygame.draw.line(
             surface,
-            _ARMY_MARKER_RGB,
+            marker_rgb,
             (icx - half, icy + half),
             (icx + half, icy - half),
             line_w,
@@ -1076,6 +1123,43 @@ def _map_viewport_rect(
     map_h = max(1, client_h - TIME_BAR_HEIGHT - SETTINGS_BAR_HEIGHT)
     inner_w = max(1, client_w - dragon_panel_w - inspector_panel_w)
     return pygame.Rect(dragon_panel_w, TIME_BAR_HEIGHT, inner_w, map_h)
+
+
+def _map_zoom_control_rects(map_viewport: pygame.Rect) -> tuple[pygame.Rect, pygame.Rect]:
+    """Return ``(zoom_in +, zoom_out −)`` at the top-right of the map viewport."""
+
+    w = _MAP_ZOOM_BTN_SIZE
+    h = _MAP_ZOOM_BTN_SIZE
+    x = map_viewport.right - _MAP_ZOOM_BTN_MARGIN - w
+    y_in = map_viewport.y + _MAP_ZOOM_BTN_MARGIN
+    y_out = y_in + h + _MAP_ZOOM_BTN_GAP
+    return (
+        pygame.Rect(x, y_in, w, h),
+        pygame.Rect(x, y_out, w, h),
+    )
+
+
+def _draw_map_zoom_controls(
+    surface: pygame.Surface,
+    font: pygame.font.Font,
+    map_viewport: pygame.Rect,
+    *,
+    theme: DragonUITheme,
+) -> tuple[pygame.Rect, pygame.Rect]:
+    """Paint + / − zoom buttons; return rects for hit testing."""
+
+    mx, my = pygame.mouse.get_pos()
+    zoom_in_rect, zoom_out_rect = _map_zoom_control_rects(map_viewport)
+    for rect, label in ((zoom_in_rect, "+"), (zoom_out_rect, "\u2212")):
+        _draw_button(
+            surface,
+            font,
+            rect,
+            label,
+            hovered=rect.collidepoint(mx, my),
+            border_rgb=theme.border_rgb,
+        )
+    return zoom_in_rect, zoom_out_rect
 
 
 def clamp_gameplay_side_panel_widths(
@@ -1445,7 +1529,10 @@ def _draw_army_combat_overlay(
     cy = overlay.y + inner_pad
     col_w = max(120, (overlay.w - 3 * inner_pad) // 2)
 
-    _draw_text(surface, font, "Army combat", (cx, cy), _UI_TEXT_RGB)
+    heroes_party = _army_kind(army) == ArmyKind.HEROES_PARTY
+    combat_title = "Hero's Party combat" if heroes_party else "Army combat"
+    army_column_label = "Hero's Party" if heroes_party else "Army"
+    _draw_text(surface, font, combat_title, (cx, cy), _UI_TEXT_RGB)
     cy += 26
 
     col_dragon_x = cx
@@ -1458,7 +1545,7 @@ def _draw_army_combat_overlay(
         surface.blit(ps, (col_dragon_x, y0))
         y0 += ps.get_height() + 6
     _draw_text(surface, font_small, "Dragon", (col_dragon_x, y0), _UI_TEXT_RGB)
-    _draw_text(surface, font_small, "Army", (col_army_x, y0), _UI_TEXT_RGB)
+    _draw_text(surface, font_small, army_column_label, (col_army_x, y0), _UI_TEXT_RGB)
     y0 += 22
     army_max_hp = int(army.max_hp)
     d_lines = (
@@ -1550,6 +1637,57 @@ class DragonUpgradeOverlayClickRects:
     cost: dict[DragonUpgradeStat, pygame.Rect]
     reset: pygame.Rect
     next_day: pygame.Rect
+
+
+def _draw_game_over_overlay(
+    surface: pygame.Surface,
+    client_w: int,
+    client_h: int,
+    font_big: pygame.font.Font,
+    font_mid: pygame.font.Font,
+    *,
+    turns_survived: int,
+) -> pygame.Rect:
+    """Full-window modal for loss; returns the New Game button rect."""
+
+    dim = pygame.Surface((client_w, client_h), pygame.SRCALPHA)
+    dim.fill((12, 14, 20, 240))
+    surface.blit(dim, (0, 0))
+
+    panel_w = min(520, max(280, client_w - 80))
+    panel_h = min(220, max(160, client_h // 4))
+    panel = pygame.Rect(
+        (client_w - panel_w) // 2,
+        (client_h - panel_h) // 2,
+        panel_w,
+        panel_h,
+    )
+    pygame.draw.rect(surface, _UI_PANEL_RGB, panel, border_radius=10)
+    pygame.draw.rect(surface, _UI_BORDER_RGB, panel, width=1, border_radius=10)
+
+    title = f"Game over — Survived {turns_survived} turns"
+    title_surf = font_big.render(title, True, _UI_TEXT_RGB)
+    surface.blit(
+        title_surf,
+        (panel.centerx - title_surf.get_width() // 2, panel.y + 28),
+    )
+
+    btn_w, btn_h = 180, 40
+    new_game_btn = pygame.Rect(
+        panel.centerx - btn_w // 2,
+        panel.bottom - btn_h - 28,
+        btn_w,
+        btn_h,
+    )
+    mx, my = pygame.mouse.get_pos()
+    _draw_button(
+        surface,
+        font_mid,
+        new_game_btn,
+        "New Game",
+        hovered=new_game_btn.collidepoint(mx, my),
+    )
+    return new_game_btn
 
 
 _DRAGON_UPGRADE_STAT_LABELS: dict[DragonUpgradeStat, str] = {
@@ -1962,6 +2100,18 @@ def _draw_tile_inspector_panel(
                 layout.advance(btn_h + 8)
 
             if army_entity is not None:
+                destroy_gold = int(getattr(army_entity, "victory_gold", 0))
+                destroy_payout = f"Destroy payout: {destroy_gold}"
+                if layout.is_visible(line_h_small):
+                    _draw_text(
+                        surface,
+                        font_small,
+                        destroy_payout,
+                        (layout.x, layout.screen_y()),
+                        _UI_MUTED_TEXT_RGB,
+                    )
+                layout.advance(line_gap)
+
                 can_attack = False
                 if not combat_busy and not game_over:
                     can_attack, _ = _validate_dragon_vs_army(
@@ -2143,18 +2293,20 @@ def run_movement_playtest(
         win_w = initial_w
         win_h = initial_h
         origin: tuple[float, float] = (0.0, 0.0)
+        map_camera = MapViewportCamera()
 
         def apply_layout(client_w: int, client_h: int) -> None:
             """Recompute hex size and origin for a client-area size."""
 
-            nonlocal win_w, win_h, hex_size, origin
+            nonlocal win_w, win_h, hex_size, origin, map_camera
             win_w, win_h = client_w, client_h
             if game_map is None:
                 return
             map_h = max(1, client_h - TIME_BAR_HEIGHT - SETTINGS_BAR_HEIGHT)
             map_canvas_w = max(1, client_w - dragon_panel_w - inspector_panel_w)
-            hs, (ox, oy), _ = layout_map_on_canvas(game_map, map_canvas_w, map_h)
-            hex_size = hs
+            resolved = resolve_map_view(game_map, map_canvas_w, map_h, map_camera)
+            hex_size = resolved.hex_size
+            ox, oy = resolved.origin_local
             origin = (float(dragon_panel_w) + ox, float(TIME_BAR_HEIGHT) + oy)
 
         def _ensure_window_meets_gameplay_floors() -> None:
@@ -2175,6 +2327,8 @@ def run_movement_playtest(
         apply_layout(initial_w, initial_h)
 
         day_index = 1
+        heroes_party_city_pool = HeroesPartyCityPool()
+        heroes_party_rng = random.Random()
         # Screens: main_menu, new_game_maps, new_game_dragon, game, settings,
         # game_options, map_creator_setup, map_creator_editor, map_editor
         screen: str = "game" if skip_menus else "main_menu"
@@ -2185,9 +2339,12 @@ def run_movement_playtest(
         focused_field: str | None = None  # dims | name
         settings_status: str = ""
         game_tuning: GameTuning = default_game_tuning()
+        game_options_difficulty: DifficultyLevel = "normal"
         game_options_scroll: int = 0
         game_options_drag_attr: str | None = None
         game_options_track_rects: dict[str, pygame.Rect] = {}
+        game_options_preset_rects: dict[DifficultyLevel, pygame.Rect] = {}
+        game_over_new_game_rect: pygame.Rect | None = None
 
         draft = _MapCreatorDraft(
             dims=_TextField("Map size (e.g. 50x50)", "30x30", pygame.Rect(60, 170, 260, 36)),
@@ -2333,17 +2490,21 @@ def run_movement_playtest(
             nonlocal inspector_army_attack_button_rect
             nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
-            nonlocal dragon_panel_scroll, inspector_panel_scroll
+            nonlocal dragon_panel_scroll, inspector_panel_scroll, map_camera
+            nonlocal heroes_party_city_pool, heroes_party_rng
             game_map = new_map
             citadel_coord = _find_citadel_coord(game_map)
             dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
             day_index = 1
+            heroes_party_city_pool = HeroesPartyCityPool()
+            heroes_party_rng = random.Random()
             settings_status = ""
             inspector_focus_coord = None
             inspector_message = ""
             dragon_ability_button_rects = {}
             dragon_panel_scroll = 0
             inspector_panel_scroll = 0
+            map_camera = MapViewportCamera()
             targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
@@ -2363,6 +2524,33 @@ def run_movement_playtest(
             _ensure_window_meets_gameplay_floors()
             screen = "game"
 
+        def _enter_game_over() -> None:
+            """Lock the session until the player starts a new run on the same map."""
+
+            nonlocal game_over, inspector_message
+            nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
+            nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
+            nonlocal targeting_ability_name
+            nonlocal raid_combat_settlement, raid_overlay_banner
+            nonlocal raid_overlay_auto_close_deadline_ms
+            nonlocal army_combat_target, army_overlay_banner
+            nonlocal army_overlay_auto_close_deadline_ms
+            if game_over:
+                return
+            game_over = True
+            inspector_message = ""
+            dragon_upgrade_overlay_active = False
+            dragon_upgrade_draft = []
+            dragon_upgrade_overlay_baseline = None
+            dragon_upgrade_overlay_click = None
+            targeting_ability_name = None
+            raid_combat_settlement = None
+            raid_overlay_banner = ""
+            raid_overlay_auto_close_deadline_ms = None
+            army_combat_target = None
+            army_overlay_banner = ""
+            army_overlay_auto_close_deadline_ms = None
+
         def _begin_play_session_from_pending_map() -> tuple[bool, str]:
             """Load ``pending_map_path`` with ``session_dragon_kind`` and enter ``game``."""
             nonlocal game_map, citadel_coord, dragon, day_index, screen
@@ -2376,8 +2564,9 @@ def run_movement_playtest(
             nonlocal inspector_army_attack_button_rect
             nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
-            nonlocal dragon_panel_scroll, inspector_panel_scroll
-            nonlocal game_tuning
+            nonlocal dragon_panel_scroll, inspector_panel_scroll, map_camera
+            nonlocal game_tuning, game_options_difficulty
+            nonlocal heroes_party_city_pool, heroes_party_rng
             if pending_map_path is None:
                 return False, "No map selected."
             try:
@@ -2398,6 +2587,8 @@ def run_movement_playtest(
             citadel_coord = _find_citadel_coord(game_map)
             dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
             day_index = 1
+            heroes_party_city_pool = HeroesPartyCityPool()
+            heroes_party_rng = random.Random()
             settings_status = ""
             new_game_status = ""
             inspector_focus_coord = None
@@ -2405,6 +2596,7 @@ def run_movement_playtest(
             dragon_ability_button_rects = {}
             dragon_panel_scroll = 0
             inspector_panel_scroll = 0
+            map_camera = MapViewportCamera()
             targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
@@ -2426,6 +2618,7 @@ def run_movement_playtest(
             pick_ctx = dragon_pick_context
             if pick_ctx == "new_game":
                 game_tuning = default_game_tuning()
+                game_options_difficulty = "normal"
             dragon_pick_context = None
             return True, ""
 
@@ -2441,7 +2634,9 @@ def run_movement_playtest(
             nonlocal army_overlay_attack_rect, army_overlay_retreat_rect
             nonlocal dragon_upgrade_overlay_click
             nonlocal game_options_track_rects
+            nonlocal game_options_preset_rects
             nonlocal game_options_scroll
+            nonlocal game_over_new_game_rect
             surf = pygame.display.get_surface()
             surf.fill(BACKGROUND_COLOR)
 
@@ -2622,10 +2817,8 @@ def run_movement_playtest(
                     f"Gold {dragon.gold}",
                     f"Citadel HP {citadel_hp}/{CITADEL_STARTING_HP}",
                     display_name_for_kind(dragon.kind),
-                    "Hour bar = hours left",
-                    "Muted = unreachable",
-                    "Right-click: inspect",
-                    "Citadel: upgrades then next day",
+                    "Right-click tiles to inspect",
+                    "Return to the Citadel to upgrade and heal",
                 ]
                 if game_over:
                     caption_bits.insert(3, "GAME OVER")
@@ -2802,22 +2995,12 @@ def run_movement_playtest(
                     army_overlay_attack_rect = None
                     army_overlay_retreat_rect = None
 
-                if game_over:
-                    go_shade = pygame.Surface((map_viewport.w, map_viewport.h), pygame.SRCALPHA)
-                    go_shade.fill((24, 12, 36, 210))
-                    surf.blit(go_shade, map_viewport.topleft)
-                    go_msg = font_mid.render(
-                        "Game over — the citadel has fallen.",
-                        True,
-                        (240, 180, 220),
-                    )
-                    surf.blit(
-                        go_msg,
-                        (
-                            map_viewport.centerx - go_msg.get_width() // 2,
-                            map_viewport.centery - go_msg.get_height() // 2,
-                        ),
-                    )
+                _draw_map_zoom_controls(
+                    surf,
+                    font_small,
+                    map_viewport,
+                    theme=ui_theme,
+                )
 
                 if targeting_ability_name is not None:
                     mx_t, my_t = pygame.mouse.get_pos()
@@ -2845,7 +3028,11 @@ def run_movement_playtest(
                 )
 
                 dragon_upgrade_overlay_click = None
-                if dragon_upgrade_overlay_active and dragon_upgrade_overlay_baseline is not None:
+                if (
+                    dragon_upgrade_overlay_active
+                    and dragon_upgrade_overlay_baseline is not None
+                    and not game_over
+                ):
                     dragon_upgrade_overlay_click = _draw_dragon_upgrade_overlay(
                         surf,
                         theme=ui_theme,
@@ -2856,6 +3043,17 @@ def run_movement_playtest(
                         font_small_bold=font_small_bold,
                         baseline=dragon_upgrade_overlay_baseline,
                         draft=dragon_upgrade_draft,
+                    )
+
+                game_over_new_game_rect = None
+                if game_over:
+                    game_over_new_game_rect = _draw_game_over_overlay(
+                        surf,
+                        win_w,
+                        win_h,
+                        font_big,
+                        font_mid,
+                        turns_survived=day_index,
                     )
 
             elif screen == "settings":
@@ -2930,16 +3128,29 @@ def run_movement_playtest(
             elif screen == "game_options":
                 surf.fill(_UI_BG_RGB)
                 game_options_track_rects = {}
+                game_options_preset_rects = {}
                 _draw_text(surf, font_big, "Game Options", (60, 60), _UI_TEXT_RGB)
-                _draw_text(
-                    surf,
-                    font,
-                    "Session tuning — applies on the next phase / raid / spawn / end-of-day heal.",
-                    (60, 95),
-                    _UI_MUTED_TEXT_RGB,
-                )
                 mx, my = pygame.mouse.get_pos()
-                panel = pygame.Rect(40, 120, win_w - 80, win_h - 200)
+                preset_y = 125
+                preset_x = 60
+                preset_w, preset_h, preset_gap = 90, 36, 10
+                for level, label in (
+                    ("easy", "Easy"),
+                    ("normal", "Normal"),
+                    ("hard", "Hard"),
+                ):
+                    btn = pygame.Rect(preset_x, preset_y, preset_w, preset_h)
+                    preset_x += preset_w + preset_gap
+                    game_options_preset_rects[level] = btn
+                    _draw_button(
+                        surf,
+                        font_mid,
+                        btn,
+                        label,
+                        hovered=btn.collidepoint(mx, my),
+                        active=game_options_difficulty == level,
+                    )
+                panel = pygame.Rect(40, 170, win_w - 80, win_h - 250)
                 pygame.draw.rect(surf, _UI_PANEL_RGB, panel, border_radius=8)
                 pygame.draw.rect(surf, _UI_BORDER_RGB, panel, width=1, border_radius=8)
 
@@ -3151,6 +3362,9 @@ def run_movement_playtest(
                     if screen == "game" and dragon_upgrade_overlay_active:
                         redraw()
                         continue
+                    if screen == "game" and game_over:
+                        redraw()
+                        continue
                     if screen == "game" and targeting_ability_name is not None:
                         targeting_ability_name = None
                         inspector_message = "Ability targeting cancelled."
@@ -3217,6 +3431,7 @@ def run_movement_playtest(
                     and screen == "game"
                     and game_map is not None
                     and dragon is not None
+                    and not game_over
                 ):
                     mx_w, my_w = pygame.mouse.get_pos()
                     map_row_h = win_h - TIME_BAR_HEIGHT - SETTINGS_BAR_HEIGHT
@@ -3245,6 +3460,26 @@ def run_movement_playtest(
                         )
                         redraw()
                         continue
+                    map_vp = _map_viewport_rect(
+                        win_w,
+                        win_h,
+                        dragon_panel_w=dragon_panel_w,
+                        inspector_panel_w=inspector_panel_w,
+                    )
+                    if map_vp.collidepoint(mx_w, my_w):
+                        # Viewport-local anchor for cursor-anchored zoom (map_camera).
+                        anchor_local = (float(mx_w - map_vp.x), float(my_w - map_vp.y))
+                        map_camera = apply_wheel_zoom(
+                            map_camera,
+                            game_map,
+                            map_vp.w,
+                            map_vp.h,
+                            anchor_local=anchor_local,
+                            wheel_y=event.y,
+                        )
+                        apply_layout(win_w, win_h)
+                        redraw()
+                        continue
 
                 if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     splitter_drag = None
@@ -3257,6 +3492,7 @@ def run_movement_playtest(
                     and splitter_drag is not None
                     and screen == "game"
                     and game_map is not None
+                    and not game_over
                 ):
                     mx_m, _my_m = event.pos
                     if splitter_drag == "left":
@@ -3370,7 +3606,7 @@ def run_movement_playtest(
                         and dragon is not None
                         and citadel_coord is not None
                     )
-                    if in_play_session_rc and not dragon_upgrade_overlay_active:
+                    if in_play_session_rc and not dragon_upgrade_overlay_active and not game_over:
                         if targeting_ability_name is not None:
                             targeting_ability_name = None
                             inspector_message = "Ability targeting cancelled."
@@ -3514,6 +3750,15 @@ def run_movement_playtest(
                         )
                         gmap, dgn, ccd = game_map, dragon, citadel_coord
 
+                        if game_over:
+                            if (
+                                game_over_new_game_rect is not None
+                                and game_over_new_game_rect.collidepoint(mx, my)
+                            ):
+                                _reset_session_for_map(gmap)
+                            redraw()
+                            continue
+
                         if dragon_upgrade_overlay_active:
                             if dragon_upgrade_overlay_click is not None:
                                 clk = dragon_upgrade_overlay_click
@@ -3539,6 +3784,22 @@ def run_movement_playtest(
                                     day_index += 1
                                     for ent in settlements_by_coord.values():
                                         ent.on_settlement_phase_end(tuning=game_tuning)
+                                    heroes_spawned, heroes_party_city_pool = (
+                                        spawn_heroes_party_wave(
+                                            settlements_by_coord.values(),
+                                            day_index,
+                                            tuning=game_tuning,
+                                            pool=heroes_party_city_pool,
+                                            rng=heroes_party_rng,
+                                        )
+                                    )
+                                    heroes_spawn_message = ""
+                                    if heroes_spawned:
+                                        active_armies.extend(heroes_spawned)
+                                        heroes_spawn_message = (
+                                            f"Hero's Party marches from "
+                                            f"{len(heroes_spawned)} cities!"
+                                        )
                                     active_armies, citadel_hp, phase_msgs, phase_over = (
                                         _run_end_of_day_army_phase(
                                             gmap,
@@ -3550,10 +3811,11 @@ def run_movement_playtest(
                                     active_armies = _prune_defeated_armies(active_armies)
                                     if phase_over or citadel_hp <= 0:
                                         citadel_hp = max(0, citadel_hp)
-                                        game_over = True
-                                        inspector_message = "Game over — the citadel has fallen."
+                                        _enter_game_over()
                                     elif phase_msgs:
                                         inspector_message = phase_msgs[-1]
+                                    elif heroes_spawn_message:
+                                        inspector_message = heroes_spawn_message
                                     elif citadel_hp < CITADEL_STARTING_HP:
                                         inspector_message = f"Citadel struck! HP {citadel_hp}/{CITADEL_STARTING_HP}."
                                     redraw()
@@ -3601,7 +3863,36 @@ def run_movement_playtest(
                         in_map_column = map_left <= mx < map_right_excl
                         in_map_row = map_row_top <= my <= map_row_bottom
 
-                        if game_over:
+                        map_vp_click = _map_viewport_rect(
+                            win_w,
+                            win_h,
+                            dragon_panel_w=dragon_panel_w,
+                            inspector_panel_w=inspector_panel_w,
+                        )
+                        zoom_in_rect, zoom_out_rect = _map_zoom_control_rects(map_vp_click)
+                        zoom_anchor = (map_vp_click.w / 2.0, map_vp_click.h / 2.0)
+                        if zoom_in_rect.collidepoint(mx, my):
+                            map_camera = apply_zoom_step(
+                                map_camera,
+                                gmap,
+                                map_vp_click.w,
+                                map_vp_click.h,
+                                anchor_local=zoom_anchor,
+                                direction=1,
+                            )
+                            apply_layout(win_w, win_h)
+                            redraw()
+                            continue
+                        if zoom_out_rect.collidepoint(mx, my):
+                            map_camera = apply_zoom_step(
+                                map_camera,
+                                gmap,
+                                map_vp_click.w,
+                                map_vp_click.h,
+                                anchor_local=zoom_anchor,
+                                direction=-1,
+                            )
+                            apply_layout(win_w, win_h)
                             redraw()
                             continue
 
@@ -3679,6 +3970,9 @@ def run_movement_playtest(
                             ):
                                 target_army = army_combat_target
                                 if _army_hp(target_army) <= 0 or dgn.hp <= 0:
+                                    if dgn.hp <= 0:
+                                        on_combat_ended(dgn)
+                                        _enter_game_over()
                                     redraw()
                                     continue
                                 exchange = _resolve_army_combat_round(
@@ -3698,18 +3992,22 @@ def run_movement_playtest(
 
                                 if _army_hp(target_army) <= 0:
                                     on_combat_ended(dgn)
+                                    gold_granted = grant_army_victory_loot(
+                                        dgn, target_army
+                                    )
                                     active_armies[:] = _prune_defeated_armies(active_armies)
                                     dname = display_name_for_kind(dgn.kind)
                                     army_overlay_banner = f"{dname} destroyed the army."
+                                    if gold_granted:
+                                        army_overlay_banner += (
+                                            f" Gained {gold_granted} gold."
+                                        )
                                     army_overlay_auto_close_deadline_ms = (
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
                                     )
                                 elif dgn.hp <= 0:
                                     on_combat_ended(dgn)
-                                    army_overlay_banner = "Your dragon was defeated."
-                                    army_overlay_auto_close_deadline_ms = (
-                                        pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
-                                    )
+                                    _enter_game_over()
                                 else:
                                     army_overlay_banner = ""
                                 redraw()
@@ -3735,6 +4033,9 @@ def run_movement_playtest(
                             ):
                                 target = raid_combat_settlement
                                 if target.hp <= 0 or dgn.hp <= 0:
+                                    if dgn.hp <= 0:
+                                        on_combat_ended(dgn)
+                                        _enter_game_over()
                                     redraw()
                                     continue
                                 exchange = resolve_settlement_combat_round(
@@ -3778,10 +4079,7 @@ def run_movement_playtest(
                                     )
                                 elif dgn.hp <= 0:
                                     on_combat_ended(dgn)
-                                    raid_overlay_banner = "Your dragon was defeated."
-                                    raid_overlay_auto_close_deadline_ms = (
-                                        pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
-                                    )
+                                    _enter_game_over()
                                 else:
                                     raid_overlay_banner = ""
                                 redraw()
@@ -3856,15 +4154,22 @@ def run_movement_playtest(
                             game_options_drag_attr = None
                             redraw()
                             continue
-                        for attr, _label, lo, hi in _game_options_slider_defs():
-                            tr = game_options_track_rects.get(attr)
-                            if tr is not None and tr.collidepoint(mx, my):
-                                game_options_drag_attr = attr
-                                _game_options_set_slider_from_mouse(
-                                    game_tuning, attr, mx, tr, lo, hi
-                                )
+                        for level, preset_rect in game_options_preset_rects.items():
+                            if preset_rect.collidepoint(mx, my):
+                                apply_difficulty_preset(game_tuning, level)
+                                game_options_difficulty = level
                                 redraw()
                                 break
+                        else:
+                            for attr, _label, lo, hi in _game_options_slider_defs():
+                                tr = game_options_track_rects.get(attr)
+                                if tr is not None and tr.collidepoint(mx, my):
+                                    game_options_drag_attr = attr
+                                    _game_options_set_slider_from_mouse(
+                                        game_tuning, attr, mx, tr, lo, hi
+                                    )
+                                    redraw()
+                                    break
                         continue
 
                     if screen == "settings":
@@ -4081,6 +4386,7 @@ def run_movement_playtest(
 
             if (
                 screen == "game"
+                and not game_over
                 and raid_overlay_auto_close_deadline_ms is not None
                 and pygame.time.get_ticks() >= raid_overlay_auto_close_deadline_ms
             ):
@@ -4091,6 +4397,7 @@ def run_movement_playtest(
 
             if (
                 screen == "game"
+                and not game_over
                 and army_overlay_auto_close_deadline_ms is not None
                 and pygame.time.get_ticks() >= army_overlay_auto_close_deadline_ms
             ):
@@ -4098,6 +4405,56 @@ def run_movement_playtest(
                 army_overlay_banner = ""
                 army_overlay_auto_close_deadline_ms = None
                 redraw()
+
+            if screen == "game" and not game_over:
+                if dragon is not None and dragon.hp <= 0:
+                    _enter_game_over()
+                    redraw()
+                elif citadel_hp <= 0:
+                    _enter_game_over()
+                    redraw()
+
+            if (
+                screen == "game"
+                and game_map is not None
+                and not game_over
+                and camera_is_pannable(map_camera)
+            ):
+                map_vp_pan = _map_viewport_rect(
+                    win_w,
+                    win_h,
+                    dragon_panel_w=dragon_panel_w,
+                    inspector_panel_w=inspector_panel_w,
+                )
+                keys = pygame.key.get_pressed()
+                pan_keys = (
+                    pygame.K_w,
+                    pygame.K_a,
+                    pygame.K_s,
+                    pygame.K_d,
+                    pygame.K_UP,
+                    pygame.K_DOWN,
+                    pygame.K_LEFT,
+                    pygame.K_RIGHT,
+                )
+                if any(keys[k] for k in pan_keys):
+                    dt_sec = clock.get_time() / 1000.0
+                    next_camera = apply_keyboard_pan(
+                        map_camera,
+                        keys,
+                        dt_sec,
+                        game_map,
+                        map_vp_pan.w,
+                        map_vp_pan.h,
+                    )
+                    if (
+                        next_camera.zoom_factor != map_camera.zoom_factor
+                        or next_camera.pan_x != map_camera.pan_x
+                        or next_camera.pan_y != map_camera.pan_y
+                    ):
+                        map_camera = next_camera
+                        apply_layout(win_w, win_h)
+                        redraw()
 
             clock.tick(_FRAME_RATE)
     finally:

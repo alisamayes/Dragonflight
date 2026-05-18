@@ -8,9 +8,17 @@ import pytest
 
 from dragonflight.army import DEFAULT_ARMY_MOVEMENT_SPEED, Army
 from dragonflight.dragon import Dragon, DragonKind
-from dragonflight.game_tuning import GameTuning, default_game_tuning, resolve_tuning
+from dragonflight.game_tuning import (
+    DifficultyLevel,
+    GameTuning,
+    apply_difficulty_preset,
+    default_game_tuning,
+    difficulty_preset_values,
+    resolve_tuning,
+)
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.settlement import (
+    SETTLEMENT_GROWTH_STAT_BONUS,
     Village,
     nearby_aggression_radius,
 )
@@ -18,6 +26,77 @@ from dragonflight.settlement import (
 
 def _baseline_tuning() -> GameTuning:
     return default_game_tuning()
+
+
+def _preset_field_names() -> frozenset[str]:
+    return frozenset(difficulty_preset_values("normal").keys())
+
+
+class TestDifficultyPresets:
+    @pytest.mark.parametrize("level", ["easy", "normal", "hard"])
+    def test_preset_values_match_spec_table(self, level: DifficultyLevel) -> None:
+        expected = {
+            "easy": {
+                "army_movement_speed": 8,
+                "heroes_party_cities_per_wave": 1,
+                "nearby_radius_map_width_percent": 15,
+                "settlement_growth_eco_percent": 20,
+                "raid_eco_loss_divisor": 1.5,
+                "raid_stat_loss": 10,
+                "settlement_heal_percent_of_max_at_zero": 50,
+                "settlement_heal_percent_of_max_when_damaged": 20,
+                "dragon_citadel_end_of_day_base_heal_percent_of_max": 70,
+            },
+            "normal": {
+                "army_movement_speed": 12,
+                "heroes_party_cities_per_wave": 2,
+                "nearby_radius_map_width_percent": 30,
+                "settlement_growth_eco_percent": 15,
+                "raid_eco_loss_divisor": 2.0,
+                "raid_stat_loss": 6,
+                "settlement_heal_percent_of_max_at_zero": 80,
+                "settlement_heal_percent_of_max_when_damaged": 40,
+                "dragon_citadel_end_of_day_base_heal_percent_of_max": 50,
+            },
+            "hard": {
+                "army_movement_speed": 16,
+                "heroes_party_cities_per_wave": 3,
+                "nearby_radius_map_width_percent": 50,
+                "settlement_growth_eco_percent": 10,
+                "raid_eco_loss_divisor": 3.0,
+                "raid_stat_loss": 3,
+                "settlement_heal_percent_of_max_at_zero": 100,
+                "settlement_heal_percent_of_max_when_damaged": 60,
+                "dragon_citadel_end_of_day_base_heal_percent_of_max": 30,
+            },
+        }[level]
+        assert difficulty_preset_values(level) == expected
+
+    def test_default_game_tuning_equals_normal_preset(self) -> None:
+        t = default_game_tuning()
+        normal = GameTuning(
+            army_movement_speed=0,
+            heroes_party_cities_per_wave=0,
+            nearby_radius_map_width_percent=0,
+            settlement_heal_percent_of_max_at_zero=0,
+            settlement_heal_percent_of_max_when_damaged=0,
+            settlement_growth_eco_percent=0,
+            settlement_growth_stat_bonus=SETTLEMENT_GROWTH_STAT_BONUS,
+            raid_eco_loss_divisor=1.0,
+            raid_stat_loss=0,
+            dragon_citadel_end_of_day_base_heal_percent_of_max=0,
+        )
+        apply_difficulty_preset(normal, "normal")
+        for name in _preset_field_names():
+            assert getattr(t, name) == getattr(normal, name)
+        assert t.settlement_growth_stat_bonus == SETTLEMENT_GROWTH_STAT_BONUS
+
+    def test_apply_preset_leaves_stat_bonus_unchanged(self) -> None:
+        t = default_game_tuning()
+        t.settlement_growth_stat_bonus = 42
+        apply_difficulty_preset(t, "hard")
+        assert t.settlement_growth_stat_bonus == 42
+        assert t.army_movement_speed == 16
 
 
 class TestDefaultAndValidation:
@@ -31,8 +110,13 @@ class TestDefaultAndValidation:
         with pytest.raises(ValueError, match="army_movement_speed"):
             t.validate()
 
+    def test_validate_rejects_negative_heroes_party_cities(self) -> None:
+        t = replace(_baseline_tuning(), heroes_party_cities_per_wave=-1)
+        with pytest.raises(ValueError, match="heroes_party_cities_per_wave"):
+            t.validate()
+
     def test_validate_rejects_invalid_raid_divisor(self) -> None:
-        t = replace(_baseline_tuning(), raid_eco_loss_divisor=0)
+        t = replace(_baseline_tuning(), raid_eco_loss_divisor=0.5)
         with pytest.raises(ValueError, match="raid_eco_loss_divisor"):
             t.validate()
 
@@ -74,7 +158,7 @@ class TestRaidDefeatTuning:
     def test_raid_eco_and_stat_penalties_follow_tuning(self) -> None:
         soft = replace(
             _baseline_tuning(),
-            raid_eco_loss_divisor=10,
+            raid_eco_loss_divisor=10.0,
             raid_stat_loss=1,
         )
         defeated = Village(OffsetCoord(0, 0))
@@ -86,6 +170,16 @@ class TestRaidDefeatTuning:
 
         assert defeated.eco == 100
         assert defeated.atk == 49
+
+    def test_raid_eco_loss_supports_fractional_divisor(self) -> None:
+        easy = replace(_baseline_tuning(), raid_eco_loss_divisor=1.5)
+        defeated = Village(OffsetCoord(0, 0))
+        defeated.hp = 0
+        defeated.eco = 1000
+
+        defeated.on_raid_defeat([], map_width=10, tuning=easy)
+
+        assert defeated.eco == 666
 
 
 class TestNearbyRadiusTuning:

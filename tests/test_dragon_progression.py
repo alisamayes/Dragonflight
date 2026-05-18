@@ -1,4 +1,4 @@
-"""Tests for dragon stat upgrade pricing and draft application (spec §7)."""
+"""Tests for dragon stat upgrade pricing and draft application (spec num7)."""
 
 from __future__ import annotations
 

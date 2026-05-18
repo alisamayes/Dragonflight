@@ -1,4 +1,4 @@
-"""Settlement rules for growth, dragon combat, and raid defeat (spec §§6, 8)."""
+"""Settlement rules for growth, dragon combat, and raid defeat (spec numnum6, 8)."""
 
 from __future__ import annotations
 
@@ -28,11 +28,11 @@ def _resolved_tuning(tuning: GameTuning | None) -> GameTuning:
 SETTLEMENT_HEAL_PERCENT_OF_MAX_AT_ZERO: int = 80
 #: When ``0 < hp < max_hp``, heal this percent of :attr:`Settlement.max_hp` per tick.
 SETTLEMENT_HEAL_PERCENT_OF_MAX_WHEN_DAMAGED: int = 40
-SETTLEMENT_GROWTH_ECO_PERCENT: int = 10
+SETTLEMENT_GROWTH_ECO_PERCENT: int = 15
 SETTLEMENT_GROWTH_STAT_BONUS: int = 5
 
-RAID_ECO_LOSS_DIVISOR: int = 2
-RAID_STAT_LOSS: int = 10
+RAID_ECO_LOSS_DIVISOR: float = 2.0
+RAID_STAT_LOSS: int = 6
 #: Percent of the defeated settlement's current ``eco`` granted as dragon gold when a raid clears.
 RAID_VICTORY_GOLD_PERCENT_OF_ECO: int = 50
 RAID_DIRECT_AGGRESSION: int = 300
@@ -182,13 +182,7 @@ class Settlement:
             return SettlementPhaseOutcome(action="healed", hp_delta=self.hp - hp_before)
 
         if self.hp == self.max_hp:
-            eco_growth = (
-                self.starting_eco
-                * t.settlement_growth_eco_percent
-                // 100
-                * t.settlement_eco_growth_scale_percent
-                // 100
-            )
+            eco_growth = (self.eco * (t.settlement_growth_eco_percent / 100)) + (self.starting_eco * 0.1)
             self.eco += eco_growth
             self.atk += t.settlement_growth_stat_bonus
             self.dfn += t.settlement_growth_stat_bonus
@@ -228,7 +222,7 @@ class Settlement:
         self,
         tuning: GameTuning | None = None,
     ) -> Army | None:
-        """Spawn an army and reset aggression when the threshold is met (spec §9)."""
+        """Spawn an army and reset aggression when the threshold is met (spec num9)."""
 
         if self.aggression < self.aggression_threshold:
             return None
@@ -275,7 +269,7 @@ class Settlement:
         """Apply the raid-defeat bundle after this settlement reaches 0 HP."""
 
         t = _resolved_tuning(tuning)
-        self.eco //= t.raid_eco_loss_divisor
+        self.eco = int(self.eco / t.raid_eco_loss_divisor)
         self.atk = max(0, self.atk - t.raid_stat_loss)
         self.dfn = max(0, self.dfn - t.raid_stat_loss)
 
@@ -321,8 +315,8 @@ class City(Settlement):
 
     def __init__(self, position: OffsetCoord, *, aggression: int = 0) -> None:
         super().__init__(
-            hp=1000,
-            max_hp=1000,
+            hp=800,
+            max_hp=800,
             eco=1000,
             starting_eco=1000,
             atk=70,
@@ -449,7 +443,7 @@ def run_settlement_combat_loop(
 ) -> SettlementCombatLoopResult:
     """Resolve combat rounds until defeat, dragon loss, or callback-requested retreat.
 
-    The first round always resolves immediately per spec §8. After each non-final
+    The first round always resolves immediately per spec num8. After each non-final
     round, ``should_continue`` decides whether to run another round. Real UI code
     will replace that callback; library code must not read from stdin.
 

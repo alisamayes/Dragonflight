@@ -6,7 +6,7 @@ that consumes or produces map data. It also lists the conventions Dragonflight
 uses to translate the editor's vocabulary into the gameplay `Terrain` enum.
 
 - **Schema version:** 3 (Slice 1)
-- **Coordinate system:** **odd-q flat-top offset** coordinates `(q = column, r = row)` in JSON; the simulation derives axial via `dragonflight.hex_coord.offset_to_axial` (see §3 and §8). `settings.orientation = "flat"`.
+- **Coordinate system:** **odd-q flat-top offset** coordinates `(q = column, r = row)` in JSON; the simulation derives axial via `dragonflight.hex_coord.offset_to_axial` (see num3 and num8). `settings.orientation = "flat"`.
 - **Status:** handcrafted MVP map only; procedural generation is out of scope for this slice
 
 ## 1. Top-level keys
@@ -19,12 +19,12 @@ The map file is a single JSON object with the following keys.
 | `name` | string | yes | Human-readable map name. The example map is currently `"Dev Map"`. |
 | `description` | string | yes | Free-text description. May be empty. |
 | `ownerId` | string \| null | yes | Reserved for future ownership tracking. `null` for handcrafted MVP maps. |
-| `settings` | object | yes | Map-wide settings (see §2). |
-| `hexes` | object | yes | Map of tile-key → tile object (see §3). |
+| `settings` | object | yes | Map-wide settings (see num2). |
+| `hexes` | object | yes | Map of tile-key → tile object (see num3). |
 | `regions` | array | yes | Editor-only region definitions. Currently empty. Loader ignores. |
 | `paths` | array | yes | Editor-only path overlays. Currently empty. Loader ignores. |
 | `notes` | array | yes | Editor-only annotations. Currently empty. Loader ignores. |
-| `customHexTypes` | array | yes | Project-specific hex type definitions (see §4). |
+| `customHexTypes` | array | yes | Project-specific hex type definitions (see num4). |
 | `activeLayer` | string | yes | Editor's active layer. The MVP loader only consumes the `surface` layer. |
 | `schemaVersion` | integer | yes | Schema generation. Currently `3`. Bump when the vocabulary changes (renames, new reserved names). |
 | `createdAt` | ISO 8601 timestamp | yes | Creation time, UTC. Never overwritten by edits. |
@@ -50,7 +50,7 @@ The map file is a single JSON object with the following keys.
 
 The runtime only consumes `width`, `height`, and `orientation`. Other keys are
 editor display preferences and are tolerated but ignored. The aggression
-nearby-radius default of 30% of map width (per spec §6 dev tweak) uses `settings.width`
+nearby-radius default of 30% of map width (per spec num6 dev tweak) uses `settings.width`
 as the reference dimension.
 
 ## 3. `hexes` map and per-tile shape
@@ -63,11 +63,11 @@ Per-tile fields:
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `q` | integer | yes | **Column index** in odd-q flat-top **offset** coordinates (despite the historical `q` letter). See coordinate note below and §8. |
+| `q` | integer | yes | **Column index** in odd-q flat-top **offset** coordinates (despite the historical `q` letter). See coordinate note below and num8. |
 | `r` | integer | yes | **Row index** in odd-q flat-top **offset** coordinates. |
 | `layer` | string | yes | `"surface"` for all MVP tiles. Other layers (e.g. `"underdark"`) are reserved and ignored by the loader. |
-| `hexType` | string | yes | Either a built-in name (see §5) or a custom-type `id` matching an entry in `customHexTypes`. |
-| `fogState` | string | yes | Editor-side fog state. Always `"visible"` in MVP because fog of war is out of scope (spec §4). |
+| `hexType` | string | yes | Either a built-in name (see num5) or a custom-type `id` matching an entry in `customHexTypes`. |
+| `fogState` | string | yes | Editor-side fog state. Always `"visible"` in MVP because fog of war is out of scope (spec num4). |
 | `edgeData` | object | yes | Reserved for per-edge attributes (e.g. cliffs, river segments). Currently `{}`. |
 | `connections` | array | yes | Reserved for explicit graph edges (rare overrides). Currently `[]`. |
 | `customColor` | string (hex) | optional | Present on tiles whose `hexType` is a custom type, mirroring the type's `color`. Used by the renderer when a tile carries a custom hex type so colour state survives editor moves. |
@@ -89,7 +89,7 @@ treat `(q, r)` as axial coordinates; doing so caused the rendered map to look
 like a rhombus instead of a square in earlier slices.
 
 The simulation-side **axial** coordinates (used for distance, neighbour, and
-future A* pathfinding math per spec §4 and §14) are derived from the offset
+future A* pathfinding math per spec num4 and num14) are derived from the offset
 values via `dragonflight.hex_coord.offset_to_axial` using the odd-q formula:
 
 ```text
@@ -117,7 +117,7 @@ Project-specific hex types live in this array. Each entry is:
 `id` is the string referenced by tile `hexType`. The `custom-` prefix is the
 established convention; it is recommended but not enforced. `name` is the
 human-readable label and the basis for Dragonflight's reserved-name resolution
-(see §6).
+(see num6).
 
 Current `customHexTypes` in the example map (Slice 1):
 
@@ -136,16 +136,16 @@ The loader recognises:
 | Built-in | Maps to (Dragonflight `Terrain`) | Notes |
 | --- | --- | --- |
 | `grassland` | `GRASSLAND` | Default, no movement modifiers. |
-| `mountain` | `MOUNTAIN` | Impassable to armies (spec §5). |
-| `forest` | `WOODLAND` | The loader maps `forest` → `Terrain.WOODLAND`. Armies move slower on Woodland and take additional dragon damage (spec §5). The editor's built-in name is `forest`; Dragonflight's spec name is `woodland`. This is the canonical built-in vocabulary for Woodland tiles in Slice 1, and the example map's 180 `forest` tiles are recognised through this rule (no JSON change needed). The string `woodland` itself is **not** accepted as a `hexType` value — only the editor name `forest` resolves to `WOODLAND`. |
+| `mountain` | `MOUNTAIN` | Impassable to armies (spec num5). |
+| `forest` | `WOODLAND` | The loader maps `forest` → `Terrain.WOODLAND`. Armies move slower on Woodland and take additional dragon damage (spec num5). The editor's built-in name is `forest`; Dragonflight's spec name is `woodland`. This is the canonical built-in vocabulary for Woodland tiles in Slice 1, and the example map's 180 `forest` tiles are recognised through this rule (no JSON change needed). The string `woodland` itself is **not** accepted as a `hexType` value — only the editor name `forest` resolves to `WOODLAND`. |
 | `ocean` | _retired_ | Slice 1 retyped all `ocean` tiles to the new `River` custom type; the loader rejects `ocean` at schema version ≥ 3 with a clear error. |
-| `sea` | _not recognised_ | Not a Dragonflight vocabulary term. The example map no longer contains any `sea` tiles (the 3 originally present were retyped to `River` in the Slice 1 round-1 revision). The loader fails map load with a clear error if it encounters `sea` (see §6, §7 — unknown vocabulary is fail-loud, not silently coerced). |
+| `sea` | _not recognised_ | Not a Dragonflight vocabulary term. The example map no longer contains any `sea` tiles (the 3 originally present were retyped to `River` in the Slice 1 round-1 revision). The loader fails map load with a clear error if it encounters `sea` (see num6, num7 — unknown vocabulary is fail-loud, not silently coerced). |
 
 ## 6. `hexType` resolution rule
 
 The loader resolves a tile's `hexType` to a `Terrain` enum value as follows:
 
-1. If the value matches a recognised built-in name in §5 (`grassland`,
+1. If the value matches a recognised built-in name in num5 (`grassland`,
    `mountain`, `forest`), use the mapping there.
 2. Otherwise, look up an entry in `customHexTypes` whose `id` equals the value.
    - If found, resolve by the entry's `name`:
@@ -168,10 +168,10 @@ change, with no tile reassignments needed.
 
 The following `name` values are reserved and have gameplay meaning:
 
-- `Bridge` → `BRIDGE` — allows armies to cross adjacent `River` tiles (spec §5).
-- `Citadel` → `CITADEL` — the dragon's home base; failure condition tile (spec §10).
-- `Settlement` → `SETTLEMENT` — settlement tile. Subtype is set per-hex via optional `settlementType` (`village` \| `city` \| `fort`); see §3.
-- `River` → `RIVER` — impassable to armies except via `Bridge` tiles (spec §5).
+- `Bridge` → `BRIDGE` — allows armies to cross adjacent `River` tiles (spec num5).
+- `Citadel` → `CITADEL` — the dragon's home base; failure condition tile (spec num10).
+- `Settlement` → `SETTLEMENT` — settlement tile. Subtype is set per-hex via optional `settlementType` (`village` \| `city` \| `fort`); see num3.
+- `River` → `RIVER` — impassable to armies except via `Bridge` tiles (spec num5).
 
 Names not listed above are unknown; the loader **fails map load** with a clear
 error rather than silently coercing the tile (e.g. to `GRASSLAND`). Adding a
@@ -180,10 +180,10 @@ reserved name is a schema change and must bump `schemaVersion`.
 ## 8. Coordinate system
 
 - **JSON storage:** odd-q flat-top **offset** coordinates `(q = column, r = row)`
-  on every tile. See §3 for the precise definition (even columns at baseline,
+  on every tile. See num3 for the precise definition (even columns at baseline,
   odd columns shifted down by half a hex height).
 - **Hex orientation:** flat-top, per `settings.orientation = "flat"`.
-- **Simulation math (neighbours, distance, A* pathfinding per spec §4 and §14):**
+- **Simulation math (neighbours, distance, A* pathfinding per spec num4 and num14):**
   uses **axial** coordinates derived from the offset values via
   `dragonflight.hex_coord.offset_to_axial` (`axial.q = col`,
   `axial.r = row - (col - (col & 1)) // 2`). The inverse helper is
@@ -201,7 +201,7 @@ reserved name is a schema change and must bump `schemaVersion`.
 - **Map name:** `"Dev Map"` (used as the developer-facing scenario; not a
   shipping scenario name).
 - **Coordinate convention used in this section:** all `q,r` positions below
-  are **offset** (column, row) per §3 / §8.
+  are **offset** (column, row) per num3 / num8.
 
 The example map is a 30×30 surface-layer scenario tuned to exercise:
 
@@ -216,7 +216,7 @@ The example map is a 30×30 surface-layer scenario tuned to exercise:
 - **Mountain belts:** 61 `mountain` tiles forming impassable terrain to test
   army detours.
 - **Mixed terrain backdrop:** 539 `grassland` and 180 `forest` tiles so the
-  Woodland speed/damage modifiers (spec §5) have surfaces to act on once
+  Woodland speed/damage modifiers (spec num5) have surfaces to act on once
   army movement and combat are wired up.
 
 Slice 1 only tests "see the map" — load, parse, and render. Reachability and
@@ -237,13 +237,13 @@ balance validation are deliberately deferred until armies and pathfinding land.
     `River` custom type with `customColor: #3a7bd5`. The example map now
     contains 0 unknown-vocabulary tiles. The unknown-vocab policy was also
     tightened from "warn and fall back to GRASSLAND" to "fail map load with
-    a clear error" (see §5-§7).
+    a clear error" (see num5-num7).
   - Round-2 revision (data-light, schemaVersion unchanged): the example map's
     `name` was changed from `"Untitled Map"` to `"Dev Map"`. The schema doc
     was updated to clarify that JSON `(q, r)` are **odd-q flat-top offset**
     coordinates `(column, row)`, not axial — the loader maps them directly
     to `OffsetCoord(col=q, row=r)` and converts to axial via
-    `offset_to_axial` for simulation math (see §3, §8). No tile data was
+    `offset_to_axial` for simulation math (see num3, num8). No tile data was
     changed; this round corrects a coordinate-semantics misunderstanding
     that caused the rendered map to look like a rhombus instead of a
     square.

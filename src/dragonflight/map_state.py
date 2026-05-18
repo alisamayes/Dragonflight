@@ -5,7 +5,7 @@ loader (``map_loader``) constructs a ``GameMap`` from validated map data; the
 renderer and rule systems consume it read-only. ``GameMap`` and ``Tile`` are
 ``frozen=True`` so callers cannot rebind their fields after construction —
 this enforces the architectural rule that simulation state has one owner
-(spec §13, §19; brief Acceptance Criteria).
+(spec num13, num19; brief Acceptance Criteria).
 
 Coordinate identity (round Wave-2-revision-1 amendment): tiles are keyed by
 :class:`~dragonflight.hex_coord.OffsetCoord` (odd-q flat-top), not axial.
@@ -51,7 +51,7 @@ class GameMap:
         tiles: Surface-layer tiles keyed by odd-q flat-top offset
             coordinate. The loader guarantees no duplicate keys, that every
             ``(col, row)`` lies inside ``[0, width) × [0, height)``, and that
-            ``len(tiles) == width * height`` for the surface layer (spec §4).
+            ``len(tiles) == width * height`` for the surface layer (spec num4).
     """
 
     width: int

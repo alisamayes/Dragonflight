@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from .army import ArmyKind
 from .hex_coord import OffsetCoord
 from .map_state import GameMap
 from .settlement import Settlement, SettlementType
@@ -20,6 +21,8 @@ class ArmyInspectInfo:
     max_hp: int
     atk: int
     dfn: int
+    destroy_payout: int = 0
+    display_name: str = "Army"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +104,7 @@ def tile_inspector_lines(info: TileInspectInfo) -> list[TileInspectorLine]:
         a = info.army
         lines.extend(
             [
-                TileInspectorLine(text="Army", kind="army"),
+                TileInspectorLine(text=a.display_name, kind="army"),
                 TileInspectorLine(
                     text=f"HP: {a.hp} / {a.max_hp}",
                     kind="army",
@@ -110,9 +113,21 @@ def tile_inspector_lines(info: TileInspectInfo) -> list[TileInspectorLine]:
                     text=f"Atk / Def: {a.atk} / {a.dfn}",
                     kind="army",
                 ),
+                TileInspectorLine(
+                    text=f"Destroy payout: {a.destroy_payout}",
+                    kind="army",
+                ),
             ]
         )
     return lines
+
+
+def army_display_name_for_kind(kind: ArmyKind | object | None) -> str:
+    """Human-readable army title for inspector panels."""
+
+    if kind is ArmyKind.HEROES_PARTY or kind == ArmyKind.HEROES_PARTY.value:
+        return "Hero's Party"
+    return "Army"
 
 
 def army_inspect_info_from_entity(army: Any) -> ArmyInspectInfo | None:
@@ -122,11 +137,14 @@ def army_inspect_info_from_entity(army: Any) -> ArmyInspectInfo | None:
     if hp <= 0:
         return None
     max_hp = int(getattr(army, "max_hp", hp))
+    kind = getattr(army, "kind", None)
     return ArmyInspectInfo(
         hp=hp,
         max_hp=max_hp,
         atk=int(getattr(army, "atk", 0)),
         dfn=int(getattr(army, "dfn", 0)),
+        destroy_payout=int(getattr(army, "victory_gold", 0)),
+        display_name=army_display_name_for_kind(kind),
     )
 
 

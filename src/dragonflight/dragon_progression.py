@@ -1,4 +1,4 @@
-"""Dragon stat upgrades (spec §7) — pure pricing and draft application.
+"""Dragon stat upgrades (spec num7) — pure pricing and draft application.
 
 Citadel UI opens the upgrade overlay; progression logic is dragon-scoped, not citadel-named.
 """
@@ -79,7 +79,7 @@ def dragon_upgrade_baseline_from_dragon(dragon: Dragon) -> DragonUpgradeBaseline
 
 
 def dragon_stat_upgrade_gold_cost(level_at_purchase: int, n_stat_inclusive: int) -> int:
-    """Gold for one purchase: ``200 + level*20 + n*20`` (spec §7)."""
+    """Gold for one purchase: ``200 + level*20 + n*20`` (spec num7)."""
     return (
         DRAGON_STAT_UPGRADE_COST_BASE
         + int(level_at_purchase) * DRAGON_STAT_UPGRADE_COST_LEVEL_COEFF

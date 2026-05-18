@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .army import Army
-from .combat_math import damage_dragon_attacks, damage_human_or_army_attacks
+from .combat_math import damage_dragon_attacks, damage_settlement_or_army_attacks
 from .dragon import Dragon
 from .dragon_abilities import (
     effective_attack,
@@ -39,7 +39,7 @@ def preview_settlement_round(
     dfn = enemy_defence_for_round(dragon, settlement.position, settlement.dfn)
     dragon_to_target = damage_dragon_attacks(boosted_attack, dfn)
     raw_to_dragon = (
-        damage_human_or_army_attacks(settlement.atk, effective_defence(dragon))
+        damage_settlement_or_army_attacks(settlement.atk, effective_defence(dragon))
         if enemy_can_retaliate(dragon)
         else 0
     )
@@ -61,7 +61,7 @@ def preview_army_round(dragon: Dragon, army: Army, world: GameMap) -> CombatDama
     dfn = enemy_defence_for_round(dragon, army.position, army.dfn)
     dragon_to_target = damage_dragon_attacks(boosted_attack, dfn)
     raw_to_dragon = (
-        damage_human_or_army_attacks(army.atk, effective_defence(dragon))
+        damage_settlement_or_army_attacks(army.atk, effective_defence(dragon))
         if enemy_can_retaliate(dragon)
         else 0
     )

@@ -127,7 +127,7 @@ class TestSettlementPhase:
         assert city.hp == 1000
         assert outcome.hp_delta == 0
         assert outcome.max_hp_delta == 0
-        assert city.eco == 1100
+        assert city.eco == 1150
         assert city.atk == 75
         assert city.dfn == 85
 
@@ -139,7 +139,7 @@ class TestSettlementPhase:
         assert outcome.action == "grew"
         assert village.max_hp == 500
         assert village.hp == 500
-        assert village.eco == 550
+        assert village.eco == 575
         assert village.atk == 55
         assert village.dfn == 35
 
@@ -261,8 +261,8 @@ class TestSettlementCombat:
         assert result.rounds_resolved == 2
         assert settlement.hp == 0
         assert settlement.eco == 50
-        assert settlement.atk == 70
-        assert settlement.dfn == 70
+        assert settlement.atk == 74
+        assert settlement.dfn == 74
         assert result.spawn_events == (
             Army.spawn_from_settlement(settlement),
             Army.spawn_from_settlement(nearby),
@@ -310,8 +310,8 @@ class TestRaidDefeat:
         assert nearby_aggression_radius(10) == 3
         assert events == []
         assert defeated.eco == 500
-        assert defeated.atk == 60
-        assert defeated.dfn == 70
+        assert defeated.atk == 64
+        assert defeated.dfn == 74
         assert defeated.aggression == 300
         assert nearby.aggression == 150
         assert outside.aggression == 0

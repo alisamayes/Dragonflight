@@ -1,14 +1,14 @@
-"""Tests for deterministic combat arithmetic (spec §8)."""
+"""Tests for deterministic combat arithmetic (spec num8)."""
 
 from __future__ import annotations
 
-from dragonflight.combat_math import damage_dragon_attacks, damage_human_or_army_attacks
+from dragonflight.combat_math import damage_dragon_attacks, damage_settlement_or_army_attacks
 
 
 def test_human_damage_floors_at_zero() -> None:
-    assert damage_human_or_army_attacks(0, 50) == 0
-    assert damage_human_or_army_attacks(1, 1900) == 0
-    assert damage_human_or_army_attacks(12, 4) == 11  # 1200 // 104
+    assert damage_settlement_or_army_attacks(0, 50) == 0
+    assert damage_settlement_or_army_attacks(1, 1900) == 0
+    assert damage_settlement_or_army_attacks(12, 4) == 11  # 1200 // 104
 
 
 def test_dragon_damage_floors_at_one() -> None:

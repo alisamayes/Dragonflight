@@ -207,16 +207,14 @@ Each settlement contains:
 ## Settlement Growth
 Each turn settlements:
 - Recover some HP
+OR
 - Recover eco
 - Recover power
-- Increase wealth slowly over time
+- Recover defence
 
 MVP simulation detail (aligned with code):
-- **Damaged** settlements (current HP below max): heal only that tick — **40% of max HP** when still alive but hurt; **80% of max HP** when current HP is **0** (rebuilding from collapse). No eco or combat-stat growth on that same tick.
-- **Undamaged** settlements (at full HP): gain **eco** and **ATK/DFN** growth ticks without raising max HP or current HP.
-
-If heavily damaged:
-- Recovery prioritizes rebuilding over growth
+- Damaged settlements will recovered a percentage of their max HP which will vary depending on the currentnly difficulty setting. Fully destroyed settlements (0 HP) heal significantly more than just damaged ones.
+- Undamaged settlements (at full HP) gain eco and ATK/DFN to simulate bolseting their defences. These values are again based on the difficulty. Eco is set to (5% of current eco) + (% of starting eco). Max HP isnt raised ever.
 
 ---
 

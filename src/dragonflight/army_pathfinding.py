@@ -1,4 +1,4 @@
-"""A* pathfinding for armies on axial hex grids (spec §§5, 14)."""
+"""A* pathfinding for armies on axial hex grids (spec numnum5, 14)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .hex_coord import (
 from .map_state import GameMap
 from .terrain import Terrain
 
-#: Terrains armies may enter (spec §5).
+#: Terrains armies may enter (spec num5).
 ARMY_PASSABLE_TERRAINS: frozenset[Terrain] = frozenset(
     {
         Terrain.GRASSLAND,

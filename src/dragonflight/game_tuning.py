@@ -10,6 +10,45 @@ import cycles between this module and :mod:`~dragonflight.settlement`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+DifficultyLevel = Literal["easy", "normal", "hard"]
+
+_DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
+    "easy": {
+        "army_movement_speed": 8,
+        "heroes_party_cities_per_wave": 1,
+        "nearby_radius_map_width_percent": 15,
+        "settlement_growth_eco_percent": 10,
+        "raid_eco_loss_divisor": 1.5,
+        "raid_stat_loss": 10,
+        "settlement_heal_percent_of_max_at_zero": 50,
+        "settlement_heal_percent_of_max_when_damaged": 20,
+        "dragon_citadel_end_of_day_base_heal_percent_of_max": 70,
+    },
+    "normal": {
+        "army_movement_speed": 12,
+        "heroes_party_cities_per_wave": 2,
+        "nearby_radius_map_width_percent": 30,
+        "settlement_growth_eco_percent": 5,
+        "raid_eco_loss_divisor": 2.0,
+        "raid_stat_loss": 6,
+        "settlement_heal_percent_of_max_at_zero": 80,
+        "settlement_heal_percent_of_max_when_damaged": 40,
+        "dragon_citadel_end_of_day_base_heal_percent_of_max": 50,
+    },
+    "hard": {
+        "army_movement_speed": 16,
+        "heroes_party_cities_per_wave": 3,
+        "nearby_radius_map_width_percent": 50,
+        "settlement_growth_eco_percent": 0,
+        "raid_eco_loss_divisor": 3.0,
+        "raid_stat_loss": 3,
+        "settlement_heal_percent_of_max_at_zero": 100,
+        "settlement_heal_percent_of_max_when_damaged": 60,
+        "dragon_citadel_end_of_day_base_heal_percent_of_max": 30,
+    },
+}
 
 
 @dataclass(slots=True)
@@ -17,13 +56,13 @@ class GameTuning:
     """Adjustable rule scalars; defaults mirror shipped ``DEFAULT_*`` constants."""
 
     army_movement_speed: int
+    heroes_party_cities_per_wave: int
     nearby_radius_map_width_percent: int
     settlement_heal_percent_of_max_at_zero: int
     settlement_heal_percent_of_max_when_damaged: int
     settlement_growth_eco_percent: int
     settlement_growth_stat_bonus: int
-    settlement_eco_growth_scale_percent: int
-    raid_eco_loss_divisor: int
+    raid_eco_loss_divisor: float
     raid_stat_loss: int
     dragon_citadel_end_of_day_base_heal_percent_of_max: int
 
@@ -37,6 +76,11 @@ class GameTuning:
         if self.army_movement_speed < 1:
             raise ValueError(
                 f"army_movement_speed must be >= 1, got {self.army_movement_speed}",
+            )
+        if self.heroes_party_cities_per_wave < 0:
+            raise ValueError(
+                "heroes_party_cities_per_wave must be >= 0, "
+                f"got {self.heroes_party_cities_per_wave}",
             )
         _pct("nearby_radius_map_width_percent", self.nearby_radius_map_width_percent)
         _pct(
@@ -53,12 +97,7 @@ class GameTuning:
                 "settlement_growth_stat_bonus must be >= 0, "
                 f"got {self.settlement_growth_stat_bonus}",
             )
-        if not (1 <= self.settlement_eco_growth_scale_percent <= 300):
-            raise ValueError(
-                "settlement_eco_growth_scale_percent must be between 1 and 300 inclusive, "
-                f"got {self.settlement_eco_growth_scale_percent}",
-            )
-        if self.raid_eco_loss_divisor < 1:
+        if self.raid_eco_loss_divisor < 1.0:
             raise ValueError(
                 f"raid_eco_loss_divisor must be >= 1, got {self.raid_eco_loss_divisor}",
             )
@@ -70,35 +109,38 @@ class GameTuning:
         )
 
 
+def difficulty_preset_values(level: DifficultyLevel) -> dict[str, int | float]:
+    """Return a copy of the scalar fields set by ``apply_difficulty_preset``."""
+
+    return dict(_DIFFICULTY_PRESETS[level])
+
+
+def apply_difficulty_preset(tuning: GameTuning, level: DifficultyLevel) -> None:
+    """Apply Easy / Normal / Hard scalars; leaves ``settlement_growth_stat_bonus`` unchanged."""
+
+    for key, value in _DIFFICULTY_PRESETS[level].items():
+        setattr(tuning, key, value)
+
+
 def default_game_tuning() -> GameTuning:
-    """Build tuning from ``DEFAULT_*`` / ``SETTLEMENT_*`` / ``RAID_*`` constants."""
+    """Build tuning at the Normal difficulty preset (shipped default)."""
 
-    from .army import DEFAULT_ARMY_MOVEMENT_SPEED
-    from .dragon_defaults import DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX
-    from .settlement import (
-        DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT,
-        RAID_ECO_LOSS_DIVISOR,
-        RAID_STAT_LOSS,
-        SETTLEMENT_GROWTH_ECO_PERCENT,
-        SETTLEMENT_GROWTH_STAT_BONUS,
-        SETTLEMENT_HEAL_PERCENT_OF_MAX_AT_ZERO,
-        SETTLEMENT_HEAL_PERCENT_OF_MAX_WHEN_DAMAGED,
-    )
+    from .settlement import SETTLEMENT_GROWTH_STAT_BONUS
 
-    return GameTuning(
-        army_movement_speed=DEFAULT_ARMY_MOVEMENT_SPEED,
-        nearby_radius_map_width_percent=DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT,
-        settlement_heal_percent_of_max_at_zero=SETTLEMENT_HEAL_PERCENT_OF_MAX_AT_ZERO,
-        settlement_heal_percent_of_max_when_damaged=(SETTLEMENT_HEAL_PERCENT_OF_MAX_WHEN_DAMAGED),
-        settlement_growth_eco_percent=SETTLEMENT_GROWTH_ECO_PERCENT,
+    tuning = GameTuning(
+        army_movement_speed=0,
+        heroes_party_cities_per_wave=0,
+        nearby_radius_map_width_percent=0,
+        settlement_heal_percent_of_max_at_zero=0,
+        settlement_heal_percent_of_max_when_damaged=0,
+        settlement_growth_eco_percent=0,
         settlement_growth_stat_bonus=SETTLEMENT_GROWTH_STAT_BONUS,
-        settlement_eco_growth_scale_percent=100,
-        raid_eco_loss_divisor=RAID_ECO_LOSS_DIVISOR,
-        raid_stat_loss=RAID_STAT_LOSS,
-        dragon_citadel_end_of_day_base_heal_percent_of_max=(
-            DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX
-        ),
+        raid_eco_loss_divisor=1.0,
+        raid_stat_loss=0,
+        dragon_citadel_end_of_day_base_heal_percent_of_max=0,
     )
+    apply_difficulty_preset(tuning, "normal")
+    return tuning
 
 
 def resolve_tuning(tuning: GameTuning | None) -> GameTuning:
@@ -107,4 +149,12 @@ def resolve_tuning(tuning: GameTuning | None) -> GameTuning:
     return tuning if tuning is not None else default_game_tuning()
 
 
-__all__ = ["GameTuning", "default_game_tuning", "resolve_tuning"]
+__all__ = [
+    "DifficultyLevel",
+    "GameTuning",
+    "apply_difficulty_preset",
+    "default_game_tuning",
+    "difficulty_preset_values",
+    "resolve_tuning",
+]
+

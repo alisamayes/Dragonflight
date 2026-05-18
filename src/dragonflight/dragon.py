@@ -1,4 +1,4 @@
-"""Player dragon entity — stats, scaffolding actions, time budget guards (spec §§2, 7, 8).
+"""Player dragon entity — stats, scaffolding actions, time budget guards (spec numnum2, 7, 8).
 
 Slice 2 focuses on structure: map loading/rendering stays elsewhere; richer combat
 loops, raids, aggression, citadel docking, and gold upgrades wire in behind the
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from .combat_math import damage_dragon_attacks, damage_human_or_army_attacks
+from .combat_math import damage_dragon_attacks, damage_settlement_or_army_attacks
 from .dragon_defaults import (
     DEFAULT_DRAGON_ATK,
     DEFAULT_DRAGON_DFN,
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 class DragonKind(Enum):
-    """Playable dragon archetypes (spec §7 + ``Documentation/dragon_types.md``)."""
+    """Playable dragon archetypes (spec num7 + ``Documentation/dragon_types.md``)."""
 
     RED_FIRE = "red_fire"
     BLACK_TANK = "black_tank"
@@ -54,7 +54,7 @@ class MoveAttempt:
 
 @dataclass(frozen=True, slots=True)
 class DamageRoundExchange:
-    """One automatic damage round (spec §8) without embedding full target types yet."""
+    """One automatic damage round (spec num8) without embedding full target types yet."""
 
     dragon_hp_after: int
     target_hp_after: int
@@ -75,7 +75,7 @@ class RaidAttempt:
 
 @dataclass
 class Dragon:
-    """Mutable runtime state for the single player dragon (spec §7).
+    """Mutable runtime state for the single player dragon (spec num7).
 
     :attr:`hp` is **current** hit points; :attr:`max_hp` is the pool ceiling. They start
     equal; combat reduces ``hp`` only unless a future system raises ``max_hp``.
@@ -129,7 +129,7 @@ class Dragon:
         *,
         tuning: GameTuning | None = None,
     ) -> None:
-        """Phase boundary: citadel rest heal, then reset daily hours (spec §2 Citadel → next day).
+        """Phase boundary: citadel rest heal, then reset daily hours (spec num2 Citadel → next day).
 
         Healing uses hours still on the clock **before** the reset: base percent of ``max_hp``
         (from tuning or defaults) plus bonus percent per hour remaining (see
@@ -170,7 +170,7 @@ class Dragon:
         self.hp = min(self.max_hp, self.hp + gained)
 
     def hex_distance_to(self, target: OffsetCoord) -> int:
-        """Straight-line axial distance ignoring terrain — valid for dragon flight (spec §5)."""
+        """Straight-line axial distance ignoring terrain — valid for dragon flight (spec num5)."""
         return distance(offset_to_axial(self.position), offset_to_axial(target))
 
     def _travel_hours_for_hex_distance(self, hex_distance: int) -> float:
@@ -190,7 +190,7 @@ class Dragon:
         """Return whether movement plus return to interim anchor fits the daily clock.
 
         The player must preserve enough slack to fly back home before nightfall
-        (spec §2). Skeleton uses instantaneous return distance from proposed tile
+        (spec num2). Skeleton uses instantaneous return distance from proposed tile
         to ``citadel_coord`` supplied by callers.
         """
         hours_out = self._travel_hours_for_hex_distance(outbound_hexes)
@@ -328,7 +328,7 @@ class Dragon:
             target_dfn,
         )
         raw_target_to_dragon = (
-            damage_human_or_army_attacks(target_atk, effective_defence(self))
+            damage_settlement_or_army_attacks(target_atk, effective_defence(self))
             if enemy_can_retaliate(self)
             else 0
         )
@@ -385,7 +385,7 @@ class Dragon:
         )
 
         raw_target_to_dragon = (
-            damage_human_or_army_attacks(army_atk, effective_defence(self))
+            damage_settlement_or_army_attacks(army_atk, effective_defence(self))
             if enemy_can_retaliate(self)
             else 0
         )
@@ -439,7 +439,7 @@ class Dragon:
         )
 
         raw_target_to_dragon = (
-            damage_human_or_army_attacks(settlement_defence_atk_proxy, effective_defence(self))
+            damage_settlement_or_army_attacks(settlement_defence_atk_proxy, effective_defence(self))
             if enemy_can_retaliate(self)
             else 0
         )
@@ -470,7 +470,7 @@ class Dragon:
         """Placeholder raid — validates settlement terrain and time-to-return only.
 
         Real rewards, eco/power shredding, aggression spikes, army spawns, and UI
-        confirmation land here later (spec §§6, 8, 11).
+        confirmation land here later (spec numnum6, 8, 11).
         """
         tile = world.get(settlement_coord)
         if tile is None:
@@ -497,7 +497,7 @@ class Dragon:
         self.hours_remaining -= hours_travel
         self.position = settlement_coord
 
-        # Combat rounds, aggression spillover, loot scaling, eco/power hits — spec §§6-8, §11 — TBD.
+        # Combat rounds, aggression spillover, loot scaling, eco/power hits — spec numnum6-8, num11 — TBD.
         return RaidAttempt(
             ok=True,
             reason="travel only; raid combat + payouts not simulated yet",
@@ -508,7 +508,7 @@ class Dragon:
     # -- Progression / meta placeholders ------------------------------------------
 
     def level_up(self) -> None:
-        """Advance level counters; skill unlock cadence (5/10/15) remains TODO (spec §7)."""
+        """Advance level counters; skill unlock cadence (5/10/15) remains TODO (spec num7)."""
         self.level += 1
         from .dragon_abilities import synchronize_unlocked_abilities
 
@@ -548,12 +548,12 @@ class Dragon:
         return True
 
     def repair_at_citadel_stub(self, gold_paid: int) -> bool:
-        """Placeholder for paid repairs / healing bundles at the citadel (spec §2)."""
+        """Placeholder for paid repairs / healing bundles at the citadel (spec num2)."""
         del gold_paid
         return False
 
     def retreat_from_combat_stub(self, *, attacker_prevents_easy_exit: bool = False) -> MoveAttempt:
-        """Placeholder retreat path between damage rounds (spec §8 continuation vs retreat).
+        """Placeholder retreat path between damage rounds (spec num8 continuation vs retreat).
 
         ``attacker_prevents_easy_exit`` is reserved for future zone-control or choke rules.
         """
@@ -568,7 +568,7 @@ class Dragon:
         return sum(1 for spec in unlocked_ability_specs(self) if spec.category == "passive")
 
     def consume_activatable_charge_stub(self, slot: int) -> bool:
-        """Placeholder for daily-limited dragon actives (spec §7).
+        """Placeholder for daily-limited dragon actives (spec num7).
 
         Dragons are slated to expose two charges per day across two activatables.
         """
