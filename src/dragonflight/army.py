@@ -140,7 +140,7 @@ class ArmyPhaseResult:
 def merge_army_stacks(armies: list[Army]) -> list[Army]:
     """Collapse co-located armies into one stack per hex (spec num2, num9).
 
-    Combined HP/``max_hp``/ATK/DFN use **sum**. ``movement_speed`` uses **max** so
+    Combined HP/``max_hp``/ATK/DFN use sum. ``movement_speed`` uses max so
     merged stacks retain the fastest march rate among contributors.
     """
 

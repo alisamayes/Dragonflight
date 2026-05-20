@@ -90,7 +90,7 @@ def shortest_path(
             if step_cost is None:
                 continue
             tentative = g_score[current] + step_cost
-            if tentative < g_score.get(neighbour, 10**9):
+            if tentative < g_score.get(neighbour, 109):
                 came_from[neighbour] = current
                 g_score[neighbour] = tentative
                 counter += 1
@@ -158,7 +158,7 @@ def army_sort_key(
     """Sort armies closest-to-citadel first; tie-break by ``(col, row)`` for stability."""
 
     cost = path_cost_to_goal(army_position, citadel_coord, game_map)
-    unreachable_penalty = 10**9 if cost is None else cost
+    unreachable_penalty = 109 if cost is None else cost
     return (unreachable_penalty, army_position.col, army_position.row)
 
 

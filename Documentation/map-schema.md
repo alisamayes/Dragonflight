@@ -5,9 +5,9 @@ This document describes the JSON schema used by Dragonflight map data files (e.g
 that consumes or produces map data. It also lists the conventions Dragonflight
 uses to translate the editor's vocabulary into the gameplay `Terrain` enum.
 
-- **Schema version:** 3 (Slice 1)
-- **Coordinate system:** **odd-q flat-top offset** coordinates `(q = column, r = row)` in JSON; the simulation derives axial via `dragonflight.hex_coord.offset_to_axial` (see num3 and num8). `settings.orientation = "flat"`.
-- **Status:** handcrafted MVP map only; procedural generation is out of scope for this slice
+- Schema version: 3 (Slice 1)
+- Coordinate system: odd-q flat-top offset coordinates `(q = column, r = row)` in JSON; the simulation derives axial via `dragonflight.hex_coord.offset_to_axial` (see num3 and num8). `settings.orientation = "flat"`.
+- Status: handcrafted MVP map only; procedural generation is out of scope for this slice
 
 ## 1. Top-level keys
 
@@ -63,32 +63,32 @@ Per-tile fields:
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `q` | integer | yes | **Column index** in odd-q flat-top **offset** coordinates (despite the historical `q` letter). See coordinate note below and num8. |
-| `r` | integer | yes | **Row index** in odd-q flat-top **offset** coordinates. |
+| `q` | integer | yes | Column index in odd-q flat-top offset coordinates (despite the historical `q` letter). See coordinate note below and num8. |
+| `r` | integer | yes | Row index in odd-q flat-top offset coordinates. |
 | `layer` | string | yes | `"surface"` for all MVP tiles. Other layers (e.g. `"underdark"`) are reserved and ignored by the loader. |
 | `hexType` | string | yes | Either a built-in name (see num5) or a custom-type `id` matching an entry in `customHexTypes`. |
 | `fogState` | string | yes | Editor-side fog state. Always `"visible"` in MVP because fog of war is out of scope (spec num4). |
 | `edgeData` | object | yes | Reserved for per-edge attributes (e.g. cliffs, river segments). Currently `{}`. |
 | `connections` | array | yes | Reserved for explicit graph edges (rare overrides). Currently `[]`. |
 | `customColor` | string (hex) | optional | Present on tiles whose `hexType` is a custom type, mirroring the type's `color`. Used by the renderer when a tile carries a custom hex type so colour state survives editor moves. |
-| `settlementType` | string | optional | Only on **Settlement** terrain (`hexType` resolving to the Settlement custom type). One of `village`, `city`, `fort` (case-insensitive). If omitted, the loader treats the tile as a **village**. Non-settlement tiles may omit this field; if present on other terrain, the loader ignores it. |
+| `settlementType` | string | optional | Only on Settlement terrain (`hexType` resolving to the Settlement custom type). One of `village`, `city`, `fort` (case-insensitive). If omitted, the loader treats the tile as a village. Non-settlement tiles may omit this field; if present on other terrain, the loader ignores it. |
 
 ### Coordinate semantics of `q` and `r`
 
-The JSON's `(q, r)` keys are **odd-q flat-top offset** coordinates, not axial:
+The JSON's `(q, r)` keys are odd-q flat-top offset coordinates, not axial:
 
-- `q` is the **column index** (0-based, increases rightward).
-- `r` is the **row index** (0-based, increases downward).
+- `q` is the column index (0-based, increases rightward).
+- `r` is the row index (0-based, increases downward).
 - Even columns (`q % 2 == 0`) sit at the row baseline.
-- Odd columns (`q % 2 == 1`) are visually shifted **down** by half a hex height (i.e. odd-q "low" offset, the bundled map editor's default for flat-top hexes).
+- Odd columns (`q % 2 == 1`) are visually shifted down by half a hex height (i.e. odd-q "low" offset, the bundled map editor's default for flat-top hexes).
 
 This is the convention used by the bundled map editor and is what the
-Dragonflight loader maps **directly** to
-`dragonflight.hex_coord.OffsetCoord(col=q, row=r)`. The loader does **not**
+Dragonflight loader maps directly to
+`dragonflight.hex_coord.OffsetCoord(col=q, row=r)`. The loader does not
 treat `(q, r)` as axial coordinates; doing so caused the rendered map to look
 like a rhombus instead of a square in earlier slices.
 
-The simulation-side **axial** coordinates (used for distance, neighbour, and
+The simulation-side axial coordinates (used for distance, neighbour, and
 future A* pathfinding math per spec num4 and num14) are derived from the offset
 values via `dragonflight.hex_coord.offset_to_axial` using the odd-q formula:
 
@@ -137,7 +137,7 @@ The loader recognises:
 | --- | --- | --- |
 | `grassland` | `GRASSLAND` | Default, no movement modifiers. |
 | `mountain` | `MOUNTAIN` | Impassable to armies (spec num5). |
-| `forest` | `WOODLAND` | The loader maps `forest` → `Terrain.WOODLAND`. Armies move slower on Woodland and take additional dragon damage (spec num5). The editor's built-in name is `forest`; Dragonflight's spec name is `woodland`. This is the canonical built-in vocabulary for Woodland tiles in Slice 1, and the example map's 180 `forest` tiles are recognised through this rule (no JSON change needed). The string `woodland` itself is **not** accepted as a `hexType` value — only the editor name `forest` resolves to `WOODLAND`. |
+| `forest` | `WOODLAND` | The loader maps `forest` → `Terrain.WOODLAND`. Armies move slower on Woodland and take additional dragon damage (spec num5). The editor's built-in name is `forest`; Dragonflight's spec name is `woodland`. This is the canonical built-in vocabulary for Woodland tiles in Slice 1, and the example map's 180 `forest` tiles are recognised through this rule (no JSON change needed). The string `woodland` itself is not accepted as a `hexType` value — only the editor name `forest` resolves to `WOODLAND`. |
 | `ocean` | _retired_ | Slice 1 retyped all `ocean` tiles to the new `River` custom type; the loader rejects `ocean` at schema version ≥ 3 with a clear error. |
 | `sea` | _not recognised_ | Not a Dragonflight vocabulary term. The example map no longer contains any `sea` tiles (the 3 originally present were retyped to `River` in the Slice 1 round-1 revision). The loader fails map load with a clear error if it encounters `sea` (see num6, num7 — unknown vocabulary is fail-loud, not silently coerced). |
 
@@ -153,14 +153,14 @@ The loader resolves a tile's `hexType` to a `Terrain` enum value as follows:
      - `Citadel` → `CITADEL`
      - `Settlement` → `SETTLEMENT`
      - `River` → `RIVER`
-     - Anything else → unknown; **fail map load with a clear error** so
+     - Anything else → unknown; fail map load with a clear error so
        authors notice unrecognised vocabulary (do not silently coerce).
 3. If the value is neither a recognised built-in nor a known custom-type `id`
    (this catches values like `ocean`, `sea`, or any typo), treat as malformed
-   input and **fail map load with a clear error**.
+   input and fail map load with a clear error.
 
-This means **custom-type `id`s are stable identifiers, but the gameplay
-meaning is keyed off `name`**. Renaming a custom type therefore changes its
+This means custom-type `id`s are stable identifiers, but the gameplay
+meaning is keyed off `name`. Renaming a custom type therefore changes its
 gameplay role — Slice 1's `Village` → `Settlement` rename is exactly such a
 change, with no tile reassignments needed.
 
@@ -173,23 +173,23 @@ The following `name` values are reserved and have gameplay meaning:
 - `Settlement` → `SETTLEMENT` — settlement tile. Subtype is set per-hex via optional `settlementType` (`village` \| `city` \| `fort`); see num3.
 - `River` → `RIVER` — impassable to armies except via `Bridge` tiles (spec num5).
 
-Names not listed above are unknown; the loader **fails map load** with a clear
+Names not listed above are unknown; the loader fails map load with a clear
 error rather than silently coercing the tile (e.g. to `GRASSLAND`). Adding a
 reserved name is a schema change and must bump `schemaVersion`.
 
 ## 8. Coordinate system
 
-- **JSON storage:** odd-q flat-top **offset** coordinates `(q = column, r = row)`
+- JSON storage: odd-q flat-top offset coordinates `(q = column, r = row)`
   on every tile. See num3 for the precise definition (even columns at baseline,
   odd columns shifted down by half a hex height).
-- **Hex orientation:** flat-top, per `settings.orientation = "flat"`.
-- **Simulation math (neighbours, distance, A* pathfinding per spec num4 and num14):**
-  uses **axial** coordinates derived from the offset values via
+- Hex orientation: flat-top, per `settings.orientation = "flat"`.
+- Simulation math (neighbours, distance, A* pathfinding per spec num4 and num14):
+  uses axial coordinates derived from the offset values via
   `dragonflight.hex_coord.offset_to_axial` (`axial.q = col`,
   `axial.r = row - (col - (col & 1)) // 2`). The inverse helper is
   `axial_to_offset`. All rule code consumes axial; only the loader, the JSON
   on disk, and the renderer touch offset.
-- **Why both representations:** offset coordinates match the editor's grid
+- Why both representations: offset coordinates match the editor's grid
   layout (rectangular bounding box, rows and columns) and render as a square;
   axial coordinates make hex distance and neighbour math cheap and symmetric.
   Treating offset values as axial makes a square map render as a rhombus —
@@ -198,24 +198,24 @@ reserved name is a schema change and must bump `schemaVersion`.
 
 ## 9. Design intent of the example map (Slice 1)
 
-- **Map name:** `"Dev Map"` (used as the developer-facing scenario; not a
+- Map name: `"Dev Map"` (used as the developer-facing scenario; not a
   shipping scenario name).
-- **Coordinate convention used in this section:** all `q,r` positions below
-  are **offset** (column, row) per num3 / num8.
+- Coordinate convention used in this section: all `q,r` positions below
+  are offset (column, row) per num3 / num8.
 
 The example map is a 30×30 surface-layer scenario tuned to exercise:
 
-- **Reachability variety:** multiple `Settlement` clusters spread across the
+- Reachability variety: multiple `Settlement` clusters spread across the
   map (offset corners and centre) so future army pathfinders have non-trivial
   routes.
-- **River + bridge interaction:** a band of `River` tiles bisecting parts of
-  the map, with **4 `Bridge` tiles** placed as the only legal army crossings
+- River + bridge interaction: a band of `River` tiles bisecting parts of
+  the map, with 4 `Bridge` tiles placed as the only legal army crossings
   (at offset `(q, r)` = `(6, 5)`, `(7, 5)`, `(6, 18)`, `(25, 21)`).
-- **Single citadel:** the dragon's home at offset `(q, r) = (16, 16)`, roughly
+- Single citadel: the dragon's home at offset `(q, r) = (16, 16)`, roughly
   central, so no settlement is more than ~half-map away.
-- **Mountain belts:** 61 `mountain` tiles forming impassable terrain to test
+- Mountain belts: 61 `mountain` tiles forming impassable terrain to test
   army detours.
-- **Mixed terrain backdrop:** 539 `grassland` and 180 `forest` tiles so the
+- Mixed terrain backdrop: 539 `grassland` and 180 `forest` tiles so the
   Woodland speed/damage modifiers (spec num5) have surfaces to act on once
   army movement and combat are wired up.
 
@@ -224,10 +224,10 @@ balance validation are deliberately deferred until armies and pathfinding land.
 
 ## 10. Schema version history
 
-- **v1:** initial editor export. Pre-Dragonflight.
-- **v2:** custom hex types `Bridge`, `Citadel`, `Village` introduced. Used by
+- v1: initial editor export. Pre-Dragonflight.
+- v2: custom hex types `Bridge`, `Citadel`, `Village` introduced. Used by
   the example map prior to Slice 1.
-- **v3 (current):** Slice 1.
+- v3 (current): Slice 1.
   - `Village` (custom-5c5b120e) renamed to `Settlement`.
   - New custom type `River` (`custom-river-0001`, `#3a7bd5`) added.
   - All `ocean` tiles retyped to `River` and gained `customColor: #3a7bd5`.
@@ -240,7 +240,7 @@ balance validation are deliberately deferred until armies and pathfinding land.
     a clear error" (see num5-num7).
   - Round-2 revision (data-light, schemaVersion unchanged): the example map's
     `name` was changed from `"Untitled Map"` to `"Dev Map"`. The schema doc
-    was updated to clarify that JSON `(q, r)` are **odd-q flat-top offset**
+    was updated to clarify that JSON `(q, r)` are odd-q flat-top offset
     coordinates `(column, row)`, not axial — the loader maps them directly
     to `OffsetCoord(col=q, row=r)` and converts to axial via
     `offset_to_axial` for simulation math (see num3, num8). No tile data was

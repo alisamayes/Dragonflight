@@ -41,7 +41,7 @@ select = ["E", "F", "I", "UP"]
 
 # Pygame UI helpers use many long single-call lines; keep other rules strict.
 [tool.ruff.lint.per-file-ignores]
-"src/dragonflight/movement_playtest.py" = ["E501"]
+"src/dragonflight/play_session.py" = ["E501"]
 "src/dragonflight/dragon_playables.py" = ["E501"]
 
 [tool.mypy]

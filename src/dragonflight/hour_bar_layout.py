@@ -8,7 +8,7 @@ def hour_bar_segment_layout(inner_width: int, gap_px: int) -> tuple[tuple[int, .
 
     Subtracts ``23 * gap`` when there is horizontal room; otherwise gaps collapse to
     zero. Pixel widths are balanced with the standard remainder trick so every hour
-    occupies the same width within a **one-pixel** tolerance. The 23 gaps (if any)
+    occupies the same width within a one-pixel tolerance. The 23 gaps (if any)
     are fixed at ``gap_px`` so each hour cell is visually the same size.
 
     Returns ``(24 segment widths, gap width used between columns)``.

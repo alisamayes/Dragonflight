@@ -9,8 +9,8 @@ Why the import indirection
 Running ``python dragonflight.py`` puts the project root at ``sys.path[0]``,
 and pytest's default import mode also prepends the project root to
 ``sys.path`` for test discovery. Either way, a plain ``from
-dragonflight.__main__ import main`` would resolve ``dragonflight`` to **this
-file** (a single ``.py`` module) instead of the ``dragonflight`` package in
+dragonflight.__main__ import main`` would resolve ``dragonflight`` to this
+file (a single ``.py`` module) instead of the ``dragonflight`` package in
 ``src/``, which would then break submodule lookups such as
 ``dragonflight.hex_coord`` (the shim has no ``__path__``).
 

@@ -221,7 +221,7 @@ def apply_one_dragon_stat_upgrade(dragon: Dragon, stat: DragonUpgradeStat) -> No
 def apply_dragon_upgrade_draft(dragon: Dragon, purchases: Sequence[DragonUpgradeStat]) -> None:
     """Spend gold for ``purchases``, apply stat deltas, then set ``level += len(purchases)``.
 
-    Costs use :attr:`Dragon.level` and per-stat counts **before** applying (draft baseline).
+    Costs use :attr:`Dragon.level` and per-stat counts before applying (draft baseline).
     """
     baseline = dragon_upgrade_baseline_from_dragon(dragon)
     total = total_dragon_upgrade_draft_cost(baseline, purchases)

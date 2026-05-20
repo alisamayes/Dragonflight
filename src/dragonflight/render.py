@@ -6,7 +6,7 @@ Pure presentation layer for the "see the map" slice (spec num4 Perspective bulle
 hex polygon filled with a per-terrain colour.
 
 Coordinate convention (round Wave-2-revision-1 amendment): the renderer is
-**offset-native**. Tiles in a ``GameMap`` are keyed by
+offset-native. Tiles in a ``GameMap`` are keyed by
 :class:`~dragonflight.hex_coord.OffsetCoord` (odd-q flat-top column / row),
 and pixel projection goes through
 :func:`~dragonflight.hex_coord.offset_to_pixel`. The axial helpers are still
@@ -19,7 +19,7 @@ Architectural rules (locked by Architectural Lead):
 
 * The colour table lives here, not in ``terrain``. ``terrain`` is the simulation's
   identity table; rendering palette is presentation policy.
-* The renderer **never mutates** ``GameMap`` (single source of truth — spec num13/num19).
+* The renderer never mutates ``GameMap`` (single source of truth — spec num13/num19).
 * No simulation rule logic in this module (no aggression, no movement, no combat).
 * Hex math comes from ``hex_coord`` (``offset_to_pixel`` / ``hex_corner_offset``);
   this module never re-derives those formulas locally.

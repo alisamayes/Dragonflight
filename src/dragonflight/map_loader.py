@@ -8,8 +8,8 @@ Pydantic-agnostic.
 
 Coordinate convention (round Wave-2-revision-1 amendment):
 
-* The JSON's per-tile ``q`` is the **column** index.
-* The JSON's per-tile ``r`` is the **row** index.
+* The JSON's per-tile ``q`` is the column index.
+* The JSON's per-tile ``r`` is the row index.
 * Both are non-negative integers within ``[0, settings.width)`` and
   ``[0, settings.height)``.
 * The loader builds :class:`~dragonflight.hex_coord.OffsetCoord` directly from
@@ -96,7 +96,7 @@ _MAX_HEX_SIZE: float = 1000.0
 _MAX_CUSTOM_HEX_TYPES: int = 64
 
 #: Inclusive upper bound on the number of entries in the top-level ``hexes``
-#: mapping. Equals ``_MAX_MAP_DIMENSION ** 2`` — the largest tile count any
+#: mapping. Equals ``_MAX_MAP_DIMENSION  2`` — the largest tile count any
 #: validly-bounded map can declare. We pre-check this before Pydantic
 #: validation so a hostile multi-million-entry mapping is rejected before
 #: paying the per-tile validation cost.

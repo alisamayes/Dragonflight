@@ -77,7 +77,7 @@ class RaidAttempt:
 class Dragon:
     """Mutable runtime state for the single player dragon (spec num7).
 
-    :attr:`hp` is **current** hit points; :attr:`max_hp` is the pool ceiling. They start
+    :attr:`hp` is current hit points; :attr:`max_hp` is the pool ceiling. They start
     equal; combat reduces ``hp`` only unless a future system raises ``max_hp``.
     :attr:`current_hp` is a convenience alias for ``hp`` (clamped when set).
     """
@@ -131,7 +131,7 @@ class Dragon:
     ) -> None:
         """Phase boundary: citadel rest heal, then reset daily hours (spec num2 Citadel → next day).
 
-        Healing uses hours still on the clock **before** the reset: base percent of ``max_hp``
+        Healing uses hours still on the clock before the reset: base percent of ``max_hp``
         (from tuning or defaults) plus bonus percent per hour remaining (see
         :mod:`dragonflight.dragon_defaults`).
         """

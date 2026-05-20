@@ -4,8 +4,8 @@ Turn-based dragon raiding strategy game (MVP, Python + Pygame).
 
 ## Status / scope
 
-The default client (`python -m dragonflight`) is an interactive **movement
-playtest**: main menu, map and dragon selection, then a three-column session
+The default client (`python -m dragonflight`) is an interactive movement
+playtest: main menu, map and dragon selection, then a three-column session
 with dragon movement, combat previews, settlements, and related prototype
 systems. A static map-only preview remains available via
 `render.run_demo` (see package docs).
@@ -61,19 +61,21 @@ python -m dragonflight
 python dragonflight.py
 ```
 
-This opens the main menu, then new-game map and dragon selection, then the
-movement playtest. Quit with `ESC` or by closing the window.
+This opens the main menu (including Game Options for difficulty presets and
+rule sliders — see Section 23 in `Documentation/Dragonflight Specification and MVP.md`),
+then new-game map and dragon selection, then the movement playtest. Quit with
+`ESC` or by closing the window.
 
 ### Map viewport controls (playtest)
 
-While in an active game session, the **central map column** supports:
+While in an active game session, the central map column supports:
 
 | Input | Effect |
 | --- | --- |
-| **Mouse wheel** (over the map) | Zoom between **1×** (entire map fits) and **3×**; zoom stays anchored under the cursor. At 1×, pan resets and the map is centered. |
-| **WASD** or **arrow keys** | Pan the map when zoomed past 1× (no effect at full fit). |
+| Mouse wheel (over the map) | Zoom between 1× (entire map fits) and 3×; zoom stays anchored under the cursor. At 1×, pan resets and the map is centered. |
+| WASD or arrow keys | Pan the map when zoomed past 1× (no effect at full fit). |
 
-Implementation: `src/dragonflight/map_camera.py`, wired from `movement_playtest.py`.
+Implementation: `src/dragonflight/map_camera.py`, wired from `play_session.py`.
 
 ## Tests + quality gates
 

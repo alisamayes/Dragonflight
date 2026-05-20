@@ -12,7 +12,7 @@ HOURS_PER_DRAGON_DAY: float = 24.0
 #: When the dragon ends the day at the citadel, heal this percent of :attr:`~dragon.Dragon.max_hp`
 #: before the hourly bonus (spec num2 Citadel Phase).
 DRAGON_CITADEL_END_OF_DAY_BASE_HEAL_PERCENT_OF_MAX: int = 50
-#: Additional percent of ``max_hp`` healed per **hour** still remaining on the clock when docking
+#: Additional percent of ``max_hp`` healed per hour still remaining on the clock when docking
 #: (rewards early return without wasting the day budget).
 DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING: int = 2
 

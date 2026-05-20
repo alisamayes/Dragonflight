@@ -5,7 +5,7 @@ from __future__ import annotations
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
 from dragonflight.army import Army, ArmyKind
-from dragonflight.movement_playtest import _PlaytestArmy
+from dragonflight.play_session import _PlaytestArmy
 from dragonflight.settlement import Village
 from dragonflight.terrain import Terrain
 from dragonflight.tile_inspection import (

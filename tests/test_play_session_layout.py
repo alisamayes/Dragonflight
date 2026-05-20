@@ -1,4 +1,4 @@
-"""Layout invariants for the movement playtest three-column HUD."""
+"""Layout invariants for the play session three-column HUD."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
-from dragonflight.movement_playtest import (
+from dragonflight.play_session import (
     _DEFAULT_HEX_SIZE_HINT,
     GAMEPLAY_MIN_MAP_VIEWPORT_H,
     GAMEPLAY_MIN_MAP_VIEWPORT_W,

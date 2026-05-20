@@ -4,7 +4,7 @@ Presentation-only: fits and scales the rendered map inside the central viewport
 without touching simulation state. Hex sizing delegates to ``render`` helpers;
 this module owns zoom factor, pan offsets, and clamping.
 
-Wired from :mod:`dragonflight.movement_playtest` on the central map column:
+Wired from :mod:`dragonflight.play_session` on the central map column:
 mouse wheel zoom (1×–3×, cursor-anchored) and WASD / arrow pan while zoomed in.
 """
 

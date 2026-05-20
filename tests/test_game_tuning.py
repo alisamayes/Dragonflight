@@ -40,7 +40,7 @@ class TestDifficultyPresets:
                 "army_movement_speed": 8,
                 "heroes_party_cities_per_wave": 1,
                 "nearby_radius_map_width_percent": 15,
-                "settlement_growth_eco_percent": 20,
+                "settlement_growth_eco_percent": 10,
                 "raid_eco_loss_divisor": 1.5,
                 "raid_stat_loss": 10,
                 "settlement_heal_percent_of_max_at_zero": 50,
@@ -51,7 +51,7 @@ class TestDifficultyPresets:
                 "army_movement_speed": 12,
                 "heroes_party_cities_per_wave": 2,
                 "nearby_radius_map_width_percent": 30,
-                "settlement_growth_eco_percent": 15,
+                "settlement_growth_eco_percent": 5,
                 "raid_eco_loss_divisor": 2.0,
                 "raid_stat_loss": 6,
                 "settlement_heal_percent_of_max_at_zero": 80,
@@ -62,7 +62,7 @@ class TestDifficultyPresets:
                 "army_movement_speed": 16,
                 "heroes_party_cities_per_wave": 3,
                 "nearby_radius_map_width_percent": 50,
-                "settlement_growth_eco_percent": 10,
+                "settlement_growth_eco_percent": 0,
                 "raid_eco_loss_divisor": 3.0,
                 "raid_stat_loss": 3,
                 "settlement_heal_percent_of_max_at_zero": 100,
@@ -147,11 +147,12 @@ class TestSettlementPhaseTuning:
 
         v0 = Village(OffsetCoord(0, 0))
         v0.on_settlement_phase_end(tuning=noneco)
-        assert v0.eco == 500
+        # growth uses (x% of current eco) + (10% of starting eco); x=0 leaves the floor term
+        assert v0.eco == 550
 
         v1 = Village(OffsetCoord(1, 0))
         v1.on_settlement_phase_end(tuning=boosted)
-        assert v1.eco == 600
+        assert v1.eco == 650
 
 
 class TestRaidDefeatTuning:
