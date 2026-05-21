@@ -37,24 +37,30 @@ from .dragon_progression import (
     total_dragon_upgrade_draft_cost,
 )
 from .dragon_ui_theme import DragonUITheme
+from .fog_of_war import FogOfWarState, is_revealed
 from .hex_coord import OffsetCoord
 from .map_state import GameMap
 from .play_session_ui import (
-    ScrollPanelLayout,
     _UI_BORDER_RGB,
     _UI_BUTTON_RGB,
     _UI_INPUT_RGB,
     _UI_MUTED_TEXT_RGB,
     _UI_TEXT_RGB,
+    ScrollPanelLayout,
     draw_button,
     draw_info_panel_chrome,
     draw_text,
     max_text_pixel_width,
     wrap_text_to_width,
 )
-from .settlement import Settlement, validate_settlement_raid, raid_victory_gold_from_eco
+from .settlement import Settlement, raid_victory_gold_from_eco, validate_settlement_raid
 from .terrain import Terrain
-from .tile_inspection import tile_inspect_info, tile_inspector_lines, terrain_display_name
+from .tile_inspection import (
+    terrain_display_name,
+    tile_inspect_info,
+    tile_inspector_lines,
+    unknown_tile_inspector_lines,
+)
 
 #: Inspector minimum column width uses this fraction of the font-metric text box (num/den).
 INSPECTOR_PANEL_MIN_WIDTH_SCALE_NUM: int = 60
@@ -632,6 +638,7 @@ def draw_tile_inspector_panel(
     game_over: bool,
     scroll_y: int = 0,
     dragon_vs_army_allowed: Callable[[Dragon, Any], tuple[bool, str]],
+    fog_of_war: FogOfWarState,
 ) -> tuple[pygame.Rect | None, pygame.Rect | None, int]:
     """Paint tile details; returns optional (raid_rect, attack_army_rect) and content height."""
 
@@ -664,13 +671,35 @@ def draw_tile_inspector_panel(
             )
         layout.advance(line_gap)
     else:
-        info = tile_inspect_info(
+        if not is_revealed(fog_of_war, inspector_focus_coord):
+            coord_label = (
+                f"Offset col {inspector_focus_coord.col}, row {inspector_focus_coord.row}"
+            )
+            if layout.is_visible(line_h_small):
+                draw_text(
+                    surface,
+                    font_small,
+                    coord_label,
+                    (layout.x, layout.screen_y()),
+                    _UI_MUTED_TEXT_RGB,
+                )
+            layout.advance(line_gap)
+            for row in unknown_tile_inspector_lines():
+                if layout.is_visible(line_h_small):
+                    draw_text(
+                        surface,
+                        font_small,
+                        row.text,
+                        (layout.x, layout.screen_y()),
+                        _UI_TEXT_RGB,
+                    )
+                layout.advance(line_gap)
+        elif (info := tile_inspect_info(
             game_map,
             inspector_focus_coord,
             settlements_by_coord,
             armies_by_coord=armies_by_coord,
-        )
-        if info is None:
+        )) is None:
             if layout.is_visible(line_h_small):
                 draw_text(
                     surface,
@@ -681,6 +710,7 @@ def draw_tile_inspector_panel(
                 )
             layout.advance(line_gap)
         else:
+            assert info is not None
             coord_label = f"Offset col {info.coord.col}, row {info.coord.row}"
             if layout.is_visible(line_h_small):
                 draw_text(

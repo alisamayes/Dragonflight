@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from dragonflight.army import Army, ArmyKind
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
-from dragonflight.army import Army, ArmyKind
 from dragonflight.play_session import _PlaytestArmy
 from dragonflight.settlement import Village
 from dragonflight.terrain import Terrain
 from dragonflight.tile_inspection import (
+    UNKNOWN_TILE_LABEL,
     army_inspect_info_from_entity,
     terrain_display_name,
     tile_inspect_info,
     tile_inspector_lines,
+    unknown_tile_inspector_lines,
 )
 
 
@@ -147,7 +149,7 @@ def test_tile_inspector_lines_heroes_party_title() -> None:
         dfn=5,
         movement_speed=8,
         position=coord,
-        kind=ArmyKind.HEROES_PARTY,
+        kind=ArmyKind.HEROES,
         victory_gold=75,
     )
     info = tile_inspect_info(game_map, coord, {}, armies_by_coord={coord: army})
@@ -168,6 +170,14 @@ def test_army_inspect_info_ignores_defeated_army() -> None:
         dfn=5,
     )
     assert army_inspect_info_from_entity(army) is None
+
+
+def test_unknown_tile_inspector_lines_show_only_unknown() -> None:
+    lines = unknown_tile_inspector_lines()
+    assert len(lines) == 1
+    assert lines[0].text == UNKNOWN_TILE_LABEL
+    assert lines[0].kind == "notice"
+    assert all("Terrain" not in ln.text for ln in lines)
 
 
 def test_tile_inspector_lines_settlement_hex_without_entity_is_notice_only() -> None:

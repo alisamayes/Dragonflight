@@ -1,4 +1,4 @@
-This file will contain info on different world events that can proc for the game. Each entry will contain an ID to identify it, a more detailed description that can be provided to the user and then an short explanation of the effect.
+This file will contain info on different world events that can proc for the game. Each entry will contain an ID to identify it, a more detailed description that can be provided to the user as flavour text and then an short explanation of the effect.
 
 id: orc_army
 desc: "Rumours of this land's spoils and current instability due to your prescence have caused an Orcish raiding party to appear. Seeing your grand Citdel on the horizon they are making a rush for it in hopes of looting you domain."
@@ -27,3 +27,5 @@ effect: The Dragon deals an additinal 15% damage for the rest of the day
 id: heavy_rain
 desc: "The clouds are dark and rain falls hard and heavy. The water coating everyting makes it harder to burn, but the settlements below rejoice as their crops are well provided for, drinking from the damp earth.
 effect: Dragon deals -15% damage for today and settlements eco growth is 150% of normal for this turn.
+
+id: 

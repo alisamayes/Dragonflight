@@ -47,7 +47,9 @@ from .army import (
 from .combat_preview import preview_army_round, preview_settlement_round
 from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from .dragon_abilities import on_combat_ended, try_use_ability
+from . import army_art
 from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
+from .tile_inspection import army_display_name_for_kind
 from .dragon_defaults import HOURS_PER_DRAGON_DAY
 from .dragon_playables import (
     default_playable_kind,
@@ -64,6 +66,13 @@ from .dragon_progression import (
     total_dragon_upgrade_draft_cost,
 )
 from .dragon_ui_theme import DragonUITheme, dragon_ui_theme_for_kind
+from .fog_of_war import (
+    FOG_UNREVEALED_RGB,
+    FogOfWarState,
+    init_fog_from_dragon,
+    is_revealed,
+    reveal_coords_in_range,
+)
 from .game_tuning import (
     DifficultyLevel,
     GameTuning,
@@ -80,16 +89,18 @@ from .map_camera import (
     camera_is_pannable,
     resolve_map_view,
 )
+from .map_loader import MapLoadError, load_map
+from .map_state import GameMap, Tile
 from .play_session_panels import (
-    INSPECTOR_PANEL_MIN_WIDTH_FLOOR_PX,
-    INSPECTOR_PANEL_MIN_WIDTH_SCALE_DEN,
-    INSPECTOR_PANEL_MIN_WIDTH_SCALE_NUM,
     DragonUpgradeOverlayClickRects,
     draw_dragon_panel,
     draw_dragon_upgrade_overlay,
     draw_tile_inspector_panel,
-    inspector_panel_raw_min_column_width as _inspector_panel_raw_min_column_width,
+)
+from .play_session_panels import (
     min_dragon_panel_column_width as _min_dragon_panel_column_width,
+)
+from .play_session_panels import (
     min_inspector_panel_column_width as _min_inspector_panel_column_width,
 )
 from .play_session_ui import (
@@ -102,14 +113,22 @@ from .play_session_ui import (
     _UI_MUTED_TEXT_RGB,
     _UI_PANEL_RGB,
     _UI_TEXT_RGB,
+)
+from .play_session_ui import (
     clamp_panel_scroll as _clamp_panel_scroll,
+)
+from .play_session_ui import (
     draw_button as _draw_button,
+)
+from .play_session_ui import (
     draw_panel_scrollbar as _draw_panel_scrollbar,
+)
+from .play_session_ui import (
     draw_text as _draw_text,
+)
+from .play_session_ui import (
     wrap_text_to_width as _wrap_text_to_width,
 )
-from .map_loader import MapLoadError, load_map
-from .map_state import GameMap, Tile
 from .render import (
     BACKGROUND_COLOR,
     MIN_CLIENT_HEIGHT,
@@ -131,7 +150,6 @@ from .settlement import (
     Settlement,
     SettlementType,
     apply_settlement_raid_victory_bundle,
-    raid_victory_gold_from_eco,
     resolve_settlement_combat_round,
     validate_settlement_raid,
 )
@@ -191,6 +209,10 @@ CITADEL_STARTING_HP: int = 3
 #: Map marker for active armies (drawn under the dragon sprite).
 _ARMY_MARKER_RGB: tuple[int, int, int] = (128, 0, 200)
 _HEROES_ARMY_MARKER_RGB: tuple[int, int, int] = (240, 160, 50)
+
+#: Army map markers and combat portraits vs the dragon baseline size.
+ARMY_MAP_MARKER_SCALE: float = 1.5
+COMBAT_PORTRAIT_SCALE: float = 1.5
 
 _MAP_ZOOM_BTN_SIZE: int = 28
 _MAP_ZOOM_BTN_MARGIN: int = 8
@@ -551,10 +573,17 @@ def _mute_rgb(rgb: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
     )
 
 
-def _make_tile_color_fn(dragon: Dragon, citadel: OffsetCoord, game_map: GameMap):
-    """Return a per-tile fill that mutes destinations failing :meth:`Dragon.validate_move`."""
+def _make_tile_color_fn(
+    dragon: Dragon,
+    citadel: OffsetCoord,
+    game_map: GameMap,
+    fog: FogOfWarState,
+):
+    """Return per-tile fill: fog gray, else terrain with reachability muting."""
 
     def tile_color(tile: Tile) -> tuple[int, int, int]:
+        if not is_revealed(fog, tile.coord):
+            return FOG_UNREVEALED_RGB
         base = default_tile_fill_rgb(tile)
         if tile.coord == dragon.position:
             return base
@@ -709,8 +738,8 @@ def _army_hp(army: Any) -> int:
 
 
 def _army_kind(army: Any) -> ArmyKind:
-    kind = getattr(army, "kind", ArmyKind.STANDARD)
-    return kind if isinstance(kind, ArmyKind) else ArmyKind.STANDARD
+    kind = getattr(army, "kind", ArmyKind.VILLAGE)
+    return kind if isinstance(kind, ArmyKind) else ArmyKind.VILLAGE
 
 
 def _set_army_hp(army: Any, hp: int) -> None:
@@ -863,20 +892,31 @@ def _draw_army_markers_on_map(
     armies: list[Any],
     hex_size: float,
     origin: tuple[float, float],
+    *,
+    fog: FogOfWarState,
 ) -> None:
-    """Purple X on each hex with a live army (below the dragon marker)."""
+    """Army pixel marker on each revealed hex (below the dragon marker); X if art missing."""
 
+    marker_side = int(
+        max(8, min(hex_size * 1.35, hex_size * 1.55) * 2 * ARMY_MAP_MARKER_SCALE)
+    )
     half = max(5, int(hex_size * 0.28))
     line_w = max(2, int(hex_size * 0.1))
     for army in armies:
         if _army_hp(army) <= 0:
             continue
+        if not is_revealed(fog, _army_position(army)):
+            continue
         cx, cy = _dragon_screen_center(_army_position(army), hex_size, origin)
         icx, icy = int(round(cx)), int(round(cy))
+        kind = _army_kind(army)
+        marker = army_art.map_marker_surface(kind, marker_side)
+        if marker is not None:
+            mrect = marker.get_rect(center=(icx, icy))
+            surface.blit(marker, mrect)
+            continue
         marker_rgb = (
-            _HEROES_ARMY_MARKER_RGB
-            if _army_kind(army) == ArmyKind.HEROES_PARTY
-            else _ARMY_MARKER_RGB
+            _HEROES_ARMY_MARKER_RGB if kind is ArmyKind.HEROES else _ARMY_MARKER_RGB
         )
         pygame.draw.line(
             surface,
@@ -1133,24 +1173,35 @@ def _draw_army_combat_overlay(
     cy = overlay.y + inner_pad
     col_w = max(120, (overlay.w - 3 * inner_pad) // 2)
 
-    heroes_party = _army_kind(army) == ArmyKind.HEROES_PARTY
-    combat_title = "Hero's Party combat" if heroes_party else "Army combat"
-    army_column_label = "Hero's Party" if heroes_party else "Army"
+    army_kind = _army_kind(army)
+    army_label = army_display_name_for_kind(army_kind)
+    combat_title = f"{army_label} combat"
     _draw_text(surface, font, combat_title, (cx, cy), _UI_TEXT_RGB)
     cy += 26
 
     col_dragon_x = cx
     col_army_x = cx + col_w + inner_pad
-    y0 = cy
+    portrait_y = cy
+    ph_base = min(72, max(40, overlay.h // 5))
+    portrait_max_h = max(1, int(round(ph_base * COMBAT_PORTRAIT_SCALE)))
+    portrait_max_w = max(1, int(round(col_w * COMBAT_PORTRAIT_SCALE)))
+
+    portrait_row_h = 0
     d_portrait = load_detailed_sprite(dragon.kind)
     if d_portrait is not None:
-        ph = min(72, max(40, overlay.h // 5))
-        ps = scaled_to_fit(d_portrait, col_w, ph)
-        surface.blit(ps, (col_dragon_x, y0))
-        y0 += ps.get_height() + 6
-    _draw_text(surface, font_small, "Dragon", (col_dragon_x, y0), _UI_TEXT_RGB)
-    _draw_text(surface, font_small, army_column_label, (col_army_x, y0), _UI_TEXT_RGB)
-    y0 += 22
+        ps = scaled_to_fit(d_portrait, portrait_max_w, portrait_max_h)
+        surface.blit(ps, (col_dragon_x, portrait_y))
+        portrait_row_h = max(portrait_row_h, ps.get_height())
+    a_portrait = army_art.load_detailed_sprite(army_kind)
+    if a_portrait is not None:
+        aps = scaled_to_fit(a_portrait, portrait_max_w, portrait_max_h)
+        surface.blit(aps, (col_army_x, portrait_y))
+        portrait_row_h = max(portrait_row_h, aps.get_height())
+
+    text_y = portrait_y + (portrait_row_h + 6 if portrait_row_h else 0)
+    _draw_text(surface, font_small, "Dragon", (col_dragon_x, text_y), _UI_TEXT_RGB)
+    _draw_text(surface, font_small, army_label, (col_army_x, text_y), _UI_TEXT_RGB)
+    stat_y = text_y + 22
     army_max_hp = int(army.max_hp)
     d_lines = (
         f"HP: {dragon.hp} / {dragon.max_hp}",
@@ -1163,7 +1214,7 @@ def _draw_army_combat_overlay(
         f"DFN: {int(army.dfn)}",
     )
     army_prev = preview_army_round(dragon, army, game_map)
-    yd = y0
+    yd = stat_y
     for i, line in enumerate(d_lines):
         if i == 0:
             _draw_muted_hp_line_with_damage_preview(
@@ -1177,7 +1228,7 @@ def _draw_army_combat_overlay(
         else:
             _draw_text(surface, font_small, line, (col_dragon_x, yd), _UI_MUTED_TEXT_RGB)
         yd += 20
-    ya = y0
+    ya = stat_y
     for i, line in enumerate(a_lines):
         if i == 0:
             _draw_muted_hp_line_with_damage_preview(
@@ -1467,6 +1518,7 @@ def run_play_session(
         inspector_panel_scroll: int = 0
         dragon_panel_content_h: int = 0
         inspector_panel_content_h: int = 0
+        fog_of_war = FogOfWarState()
         targeting_ability_name: str | None = None
         raid_combat_settlement: Settlement | None = None
         raid_overlay_banner: str = ""
@@ -1586,6 +1638,7 @@ def run_play_session(
 
         def _reset_session_for_map(new_map: GameMap) -> None:
             nonlocal game_map, citadel_coord, dragon, day_index, screen, settings_status
+            nonlocal fog_of_war
             nonlocal inspector_focus_coord, inspector_message
             nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
@@ -1626,6 +1679,7 @@ def run_play_session(
             dragon_upgrade_overlay_baseline = None
             dragon_upgrade_overlay_click = None
             _sync_settlements_from_map()
+            init_fog_from_dragon(fog_of_war, dragon, new_map)
             _ensure_window_meets_gameplay_floors()
             screen = "game"
 
@@ -1659,6 +1713,7 @@ def run_play_session(
         def _begin_play_session_from_pending_map() -> tuple[bool, str]:
             """Load ``pending_map_path`` with ``session_dragon_kind`` and enter ``game``."""
             nonlocal game_map, citadel_coord, dragon, day_index, screen
+            nonlocal fog_of_war
             nonlocal settings_status, new_game_status, dragon_pick_context
             nonlocal inspector_focus_coord, inspector_message
             nonlocal dragon_ability_button_rects, targeting_ability_name
@@ -1718,6 +1773,7 @@ def run_play_session(
             dragon_upgrade_overlay_baseline = None
             dragon_upgrade_overlay_click = None
             _sync_settlements_from_map()
+            init_fog_from_dragon(fog_of_war, dragon, new_map)
             _ensure_window_meets_gameplay_floors()
             screen = "game"
             pick_ctx = dragon_pick_context
@@ -1729,6 +1785,8 @@ def run_play_session(
 
         if game_map is not None:
             _sync_settlements_from_map()
+            if skip_menus and dragon is not None:
+                init_fog_from_dragon(fog_of_war, dragon, game_map)
 
         def redraw() -> None:
             nonlocal inspector_raid_button_rect, inspector_army_attack_button_rect
@@ -1946,7 +2004,9 @@ def run_play_session(
                 clip_prev = surf.get_clip()
                 surf.set_clip(map_viewport)
                 pygame.draw.rect(surf, BACKGROUND_COLOR, map_viewport)
-                tile_color = _make_tile_color_fn(dragon, citadel_coord, game_map)
+                tile_color = _make_tile_color_fn(
+                    dragon, citadel_coord, game_map, fog_of_war
+                )
                 render_map(
                     surf,
                     game_map,
@@ -1955,10 +2015,13 @@ def run_play_session(
                     tile_color=tile_color,
                     clear_background=False,
                 )
-                _draw_army_markers_on_map(surf, active_armies, hex_size, origin)
+                _draw_army_markers_on_map(
+                    surf, active_armies, hex_size, origin, fog=fog_of_war
+                )
                 if (
                     inspector_focus_coord is not None
                     and game_map.get(inspector_focus_coord) is not None
+                    and is_revealed(fog_of_war, inspector_focus_coord)
                 ):
                     draw_hex_outline(
                         surf,
@@ -2058,6 +2121,7 @@ def run_play_session(
                     dragon_vs_army_allowed=lambda d, a: _validate_dragon_vs_army(
                         d, a, citadel_coord=citadel_coord
                     ),
+                    fog_of_war=fog_of_war,
                 )
                 inspector_panel_scroll = _clamp_panel_scroll(
                     inspector_panel_scroll, inspector_panel_content_h, panel_viewport_h
@@ -3244,6 +3308,8 @@ def run_play_session(
                         if picked is None:
                             continue
                         outcome = dgn.move(picked, gmap, ccd)
+                        if outcome.ok:
+                            reveal_coords_in_range(fog_of_war, dgn, gmap)
                         if outcome.ok and dgn.position == ccd:
                             dragon_upgrade_overlay_active = True
                             dragon_upgrade_draft = []

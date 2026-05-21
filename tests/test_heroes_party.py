@@ -51,7 +51,7 @@ class TestHeroesPartyStats:
 
         army = Army.spawn_heroes_party_from_city(city, turn_count=5)
 
-        assert army.kind == ArmyKind.HEROES_PARTY
+        assert army.kind == ArmyKind.HEROES
         assert army.hp == city.max_hp
         assert army.max_hp == city.max_hp
         assert army.atk == city.atk + 10
@@ -66,11 +66,11 @@ class TestHeroesPartyStats:
         army = Army.spawn_heroes_party_from_city(city, turn_count=10, tuning=tuning)
         assert army.movement_speed == 9
 
-    def test_standard_spawn_sets_kind_and_ten_percent_loot(self) -> None:
+    def test_village_spawn_sets_kind_and_ten_percent_loot(self) -> None:
         village = Village(OffsetCoord(0, 0))
         village.eco = 1000
         army = Army.spawn_from_settlement(village)
-        assert army.kind == ArmyKind.STANDARD
+        assert army.kind == ArmyKind.VILLAGE
         assert army.victory_gold == standard_army_victory_gold_from_eco(1000)
         assert army.victory_gold == village.eco * 10 // 100
         assert army.source_coord == village.position
@@ -103,7 +103,7 @@ class TestHeroesPartyCitySelection:
 
         assert len(wave) == 1
         assert wave[0].position == live.position
-        assert all(a.kind == ArmyKind.HEROES_PARTY for a in wave)
+        assert all(a.kind == ArmyKind.HEROES for a in wave)
 
     def test_rotating_pool_two_waves_cover_all_cities(self) -> None:
         tuning = replace(default_game_tuning(), heroes_party_cities_per_wave=2)
@@ -126,7 +126,7 @@ class TestHeroesPartyCitySelection:
         assert len(wave2) == 2
         assert pos1.isdisjoint(pos2)
         assert pos1 | pos2 == all_positions
-        assert all(a.kind == ArmyKind.HEROES_PARTY for a in wave1 + wave2)
+        assert all(a.kind == ArmyKind.HEROES for a in wave1 + wave2)
         assert not pool.queue
 
     def test_wave_three_refreshes_shuffled_pool(self) -> None:
@@ -208,7 +208,7 @@ class TestArmyVictoryLoot:
             dfn=1,
             movement_speed=8,
             position=OffsetCoord(1, 0),
-            kind=ArmyKind.HEROES_PARTY,
+            kind=ArmyKind.HEROES,
             victory_gold=250,
         )
         granted = grant_army_victory_loot(dragon, army)
@@ -240,7 +240,7 @@ class TestArmyVictoryLoot:
             dfn=1,
             movement_speed=8,
             position=OffsetCoord(1, 0),
-            kind=ArmyKind.HEROES_PARTY,
+            kind=ArmyKind.HEROES,
             victory_gold=300,
         )
         assert grant_army_victory_loot(dragon, army) == 300
@@ -257,7 +257,7 @@ class TestHeroesPartyMerge:
             dfn=2,
             movement_speed=4,
             position=OffsetCoord(0, 0),
-            kind=ArmyKind.HEROES_PARTY,
+            kind=ArmyKind.HEROES,
             victory_gold=100,
         )
         b = Army(
@@ -267,10 +267,22 @@ class TestHeroesPartyMerge:
             dfn=3,
             movement_speed=8,
             position=OffsetCoord(0, 0),
-            kind=ArmyKind.STANDARD,
+            kind=ArmyKind.VILLAGE,
             victory_gold=50,
         )
         merged = merge_army_stacks([a, b])
         assert len(merged) == 1
-        assert merged[0].kind == ArmyKind.HEROES_PARTY
+        assert merged[0].kind == ArmyKind.HEROES
         assert merged[0].victory_gold == 150
+
+    def test_merge_kind_precedence_city_over_fort_over_village(self) -> None:
+        pos = OffsetCoord(0, 0)
+        base = dict(hp=10, max_hp=10, atk=1, dfn=1, movement_speed=4, position=pos)
+        village = Army(**base, kind=ArmyKind.VILLAGE)
+        fort = Army(**base, kind=ArmyKind.FORT)
+        city = Army(**base, kind=ArmyKind.CITY)
+        assert merge_army_stacks([village, fort])[0].kind == ArmyKind.FORT
+        assert merge_army_stacks([village, city])[0].kind == ArmyKind.CITY
+        assert merge_army_stacks([fort, city])[0].kind == ArmyKind.CITY
+        heroes = Army(**base, kind=ArmyKind.HEROES)
+        assert merge_army_stacks([city, heroes])[0].kind == ArmyKind.HEROES

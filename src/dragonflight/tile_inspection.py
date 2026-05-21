@@ -57,6 +57,17 @@ class TileInspectorLine:
     kind: Literal["terrain", "settlement", "army", "notice"]
 
 
+UNKNOWN_TILE_LABEL = "Unknown"
+
+
+def unknown_tile_inspector_lines() -> list[TileInspectorLine]:
+    """Inspector copy for a fogged tile — no terrain or entity details."""
+
+    return [
+        TileInspectorLine(text=UNKNOWN_TILE_LABEL, kind="notice"),
+    ]
+
+
 def tile_inspector_lines(info: TileInspectInfo) -> list[TileInspectorLine]:
     """Structured copy for the tile inspector.
 
@@ -125,8 +136,14 @@ def tile_inspector_lines(info: TileInspectInfo) -> list[TileInspectorLine]:
 def army_display_name_for_kind(kind: ArmyKind | object | None) -> str:
     """Human-readable army title for inspector panels."""
 
-    if kind is ArmyKind.HEROES_PARTY or kind == ArmyKind.HEROES_PARTY.value:
+    if kind is ArmyKind.HEROES or kind == ArmyKind.HEROES.value:
         return "Hero's Party"
+    if kind is ArmyKind.CITY or kind == ArmyKind.CITY.value:
+        return "City army"
+    if kind is ArmyKind.FORT or kind == ArmyKind.FORT.value:
+        return "Fort army"
+    if kind is ArmyKind.VILLAGE or kind == ArmyKind.VILLAGE.value:
+        return "Village army"
     return "Army"
 
 

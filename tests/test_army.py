@@ -5,6 +5,7 @@ from __future__ import annotations
 from dragonflight.army import (
     DEFAULT_ARMY_MOVEMENT_SPEED,
     Army,
+    ArmyKind,
     merge_army_stacks,
     resolve_army_combat_round,
     run_army_phase,
@@ -20,7 +21,7 @@ from dragonflight.citadel import DEFAULT_CITADEL_HP, CitadelState
 from dragonflight.dragon import DamageRoundExchange, Dragon, DragonKind
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
-from dragonflight.settlement import Fort, Village
+from dragonflight.settlement import City, Fort, Village
 from dragonflight.terrain import Terrain
 
 
@@ -56,6 +57,13 @@ class TestArmySpawnStats:
         assert army.dfn == village.dfn * 50 // 100
         assert army.movement_speed == DEFAULT_ARMY_MOVEMENT_SPEED
         assert army.position == village.position
+        assert army.kind == ArmyKind.VILLAGE
+
+    def test_spawn_from_fort_and_city_set_kind(self) -> None:
+        fort = Fort(OffsetCoord(1, 1))
+        city = City(OffsetCoord(2, 2))
+        assert Army.spawn_from_settlement(fort).kind == ArmyKind.FORT
+        assert Army.spawn_from_settlement(city).kind == ArmyKind.CITY
 
     def test_threshold_spawn_returns_army(self) -> None:
         fort = Fort(OffsetCoord(4, 4), aggression=250)
@@ -132,23 +140,24 @@ class TestArmyPhase:
         game_map = _coord_map(
             (0, 1, Terrain.GRASSLAND),
             (1, 1, Terrain.GRASSLAND),
-            (2, 1, Terrain.CITADEL),
+            (2, 1, Terrain.GRASSLAND),
+            (3, 1, Terrain.CITADEL),
         )
-        citadel = OffsetCoord(2, 1)
+        citadel = OffsetCoord(3, 1)
         near = Army(
             hp=10,
             max_hp=10,
             atk=1,
             dfn=1,
             movement_speed=1,
-            position=OffsetCoord(1, 1),
+            position=OffsetCoord(2, 1),
         )
         far = Army(
             hp=10,
             max_hp=10,
             atk=1,
             dfn=1,
-            movement_speed=8,
+            movement_speed=1,
             position=OffsetCoord(0, 1),
         )
 
@@ -158,7 +167,8 @@ class TestArmyPhase:
 
         assert result.citadel_attacks == 1
         assert result.citadel_hp == DEFAULT_CITADEL_HP - 1
-        assert result.armies == ()
+        assert len(result.armies) == 1
+        assert result.armies[0].position == OffsetCoord(1, 1)
         assert not result.game_over
 
     def test_merge_sums_stats_keeps_max_speed(self) -> None:
@@ -188,6 +198,39 @@ class TestArmyPhase:
         assert merged[0].atk == 12
         assert merged[0].dfn == 5
         assert merged[0].movement_speed == 8
+
+    def test_each_army_on_citadel_deals_one_damage_before_merge(self) -> None:
+        game_map = _coord_map(
+            (0, 1, Terrain.GRASSLAND),
+            (1, 1, Terrain.GRASSLAND),
+            (2, 1, Terrain.CITADEL),
+        )
+        citadel = OffsetCoord(2, 1)
+        near = Army(
+            hp=10,
+            max_hp=10,
+            atk=1,
+            dfn=1,
+            movement_speed=1,
+            position=OffsetCoord(1, 1),
+        )
+        far = Army(
+            hp=10,
+            max_hp=10,
+            atk=1,
+            dfn=1,
+            movement_speed=2,
+            position=OffsetCoord(0, 1),
+        )
+
+        result = run_army_phase(
+            game_map, [far, near], citadel_coord=citadel, citadel_hp=DEFAULT_CITADEL_HP
+        )
+
+        assert result.citadel_attacks == 2
+        assert result.citadel_hp == DEFAULT_CITADEL_HP - 2
+        assert result.armies == ()
+        assert len(result.messages) == 2
 
     def test_citadel_game_over_at_zero_hp(self) -> None:
         game_map = _coord_map((0, 1, Terrain.GRASSLAND), (1, 1, Terrain.CITADEL))

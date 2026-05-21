@@ -27,10 +27,21 @@ HEROES_PARTY_VICTORY_GOLD_PERCENT_OF_ECO: int = 25
 
 
 class ArmyKind(Enum):
-    """Distinguishes standard aggression armies from late-game Hero's Party waves."""
+    """Settlement-aligned aggression armies and late-game Hero's Party waves."""
 
-    STANDARD = "standard"
-    HEROES_PARTY = "heroes_party"
+    VILLAGE = "village"
+    FORT = "fort"
+    CITY = "city"
+    HEROES = "heroes"
+
+
+# Merge precedence when co-located stacks combine (highest wins).
+_ARMY_KIND_MERGE_PRIORITY: tuple[ArmyKind, ...] = (
+    ArmyKind.HEROES,
+    ArmyKind.CITY,
+    ArmyKind.FORT,
+    ArmyKind.VILLAGE,
+)
 
 
 class _ArmySpawnSettlement(Protocol):
@@ -39,6 +50,7 @@ class _ArmySpawnSettlement(Protocol):
     dfn: int
     eco: int
     position: OffsetCoord
+    settlement_type: object
 
 
 class _StandaloneSpawnPayload(Protocol):
@@ -65,7 +77,7 @@ class Army:
     dfn: int
     movement_speed: int
     position: OffsetCoord
-    kind: ArmyKind = ArmyKind.STANDARD
+    kind: ArmyKind = ArmyKind.VILLAGE
     victory_gold: int = 0
     source_coord: OffsetCoord | None = None
 
@@ -82,6 +94,8 @@ class Army:
 
         movement_speed = resolve_tuning(tuning).army_movement_speed
         hp_val = settlement.max_hp * ARMY_HP_PERCENT_OF_SETTLEMENT_MAX // 100
+        st = settlement.settlement_type
+        kind = army_kind_from_settlement_type(st)
         return cls(
             hp=hp_val,
             max_hp=hp_val,
@@ -89,7 +103,7 @@ class Army:
             dfn=settlement.dfn * ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN // 100,
             movement_speed=movement_speed,
             position=settlement.position,
-            kind=ArmyKind.STANDARD,
+            kind=kind,
             victory_gold=standard_army_victory_gold_from_eco(settlement.eco),
             source_coord=settlement.position,
         )
@@ -116,7 +130,7 @@ class Army:
             dfn=city.dfn + bonus,
             movement_speed=movement_speed,
             position=city.position,
-            kind=ArmyKind.HEROES_PARTY,
+            kind=ArmyKind.HEROES,
             victory_gold=heroes_party_victory_gold_from_eco(city.eco),
             source_coord=city.position,
         )
@@ -161,11 +175,7 @@ def merge_army_stacks(armies: list[Army]) -> list[Army]:
                 dfn=sum(a.dfn for a in group),
                 movement_speed=max(a.movement_speed for a in group),
                 position=position,
-                kind=(
-                    ArmyKind.HEROES_PARTY
-                    if any(a.kind == ArmyKind.HEROES_PARTY for a in group)
-                    else ArmyKind.STANDARD
-                ),
+                kind=highest_priority_army_kind(a.kind for a in group),
                 victory_gold=sum(a.victory_gold for a in group),
                 source_coord=next(
                     (a.source_coord for a in group if a.source_coord is not None),
@@ -204,10 +214,35 @@ def army_from_spawn_event(
         dfn=max(0, dfn * ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN // 100),
         movement_speed=movement_speed,
         position=position,
-        kind=ArmyKind.STANDARD,
+        # Standalone world-event spawns have no settlement archetype; treat as heroes.
+        kind=ArmyKind.HEROES,
         victory_gold=0,
         source_coord=orphan.position,
     )
+
+
+def army_kind_from_settlement_type(settlement_type: object) -> ArmyKind:
+    """Map a settlement archetype to the matching aggression army kind."""
+
+    from .settlement import SettlementType
+
+    if settlement_type is SettlementType.VILLAGE or settlement_type == SettlementType.VILLAGE.value:
+        return ArmyKind.VILLAGE
+    if settlement_type is SettlementType.FORT or settlement_type == SettlementType.FORT.value:
+        return ArmyKind.FORT
+    if settlement_type is SettlementType.CITY or settlement_type == SettlementType.CITY.value:
+        return ArmyKind.CITY
+    return ArmyKind.VILLAGE
+
+
+def highest_priority_army_kind(kinds: Iterable[ArmyKind]) -> ArmyKind:
+    """Pick display/loot archetype when merging stacks (``_ARMY_KIND_MERGE_PRIORITY``)."""
+
+    present = set(kinds)
+    for kind in _ARMY_KIND_MERGE_PRIORITY:
+        if kind in present:
+            return kind
+    return ArmyKind.VILLAGE
 
 
 def standard_army_victory_gold_from_eco(eco: int) -> int:
@@ -346,18 +381,21 @@ def run_army_phase(
             game_map,
         )
 
-    before_merge = len(active)
-    merged = merge_army_stacks(active)
-    merged_stacks = before_merge - len(merged)
-
-    attackers = [army for army in merged if army.position == citadel_coord]
+    # Citadel strikes happen per army that reaches the citadel this phase, before
+    # same-hex merge (spec: each attacking army deals 1 HP; armies despawn after).
+    attackers = [army for army in ordered if army.position == citadel_coord]
     citadel_attacks = len(attackers)
     messages: list[str] = []
     for _ in attackers:
         citadel.apply_army_attack()
         messages.append("An army reached the citadel and dealt 1 damage.")
 
-    surviving = tuple(army for army in merged if army.position != citadel_coord)
+    remaining = [army for army in ordered if army.position != citadel_coord]
+    before_merge = len(remaining)
+    merged = merge_army_stacks(remaining)
+    merged_stacks = before_merge - len(merged)
+
+    surviving = tuple(merged)
     return ArmyPhaseResult(
         armies=surviving,
         citadel_hp=citadel.hp,
@@ -448,7 +486,9 @@ __all__ = [
     "Army",
     "ArmyKind",
     "ArmyPhaseResult",
+    "army_kind_from_settlement_type",
     "army_from_spawn_event",
+    "highest_priority_army_kind",
     "collect_spawned_armies",
     "eligible_heroes_party_cities",
     "HeroesPartyCityPool",
