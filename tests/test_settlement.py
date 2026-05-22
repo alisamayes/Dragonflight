@@ -16,7 +16,8 @@ from dragonflight.settlement import (
     Settlement,
     SettlementType,
     Village,
-    nearby_aggression_radius,
+    compute_settlement_eco_growth,
+    raid_spill_aggression_amount,
     raid_victory_gold_from_eco,
     resolve_settlement_combat_round,
     resolve_settlement_raid,
@@ -42,7 +43,7 @@ class TestStartingStats:
         ("settlement", "settlement_type", "hp", "eco", "atk", "dfn", "threshold"),
         [
             (Village(OffsetCoord(1, 1)), SettlementType.VILLAGE, 500, 500, 50, 30, 500),
-            (City(OffsetCoord(2, 2)), SettlementType.CITY, 1000, 1000, 70, 80, 600),
+            (City(OffsetCoord(2, 2)), SettlementType.CITY, 800, 1000, 70, 80, 600),
             (Fort(OffsetCoord(3, 3)), SettlementType.FORT, 800, 100, 80, 80, 300),
         ],
     )
@@ -101,8 +102,8 @@ class TestSettlementPhase:
         outcome = city.on_settlement_phase_end()
 
         assert outcome.action == "healed"
-        assert city.hp == 500
-        assert city.max_hp == 1000
+        assert city.hp == 420
+        assert city.max_hp == 800
         assert city.eco == 1000
         assert city.atk == 70
         assert city.dfn == 80
@@ -123,8 +124,8 @@ class TestSettlementPhase:
         outcome = city.on_settlement_phase_end()
 
         assert outcome.action == "grew"
-        assert city.max_hp == 1000
-        assert city.hp == 1000
+        assert city.max_hp == 800
+        assert city.hp == 800
         assert outcome.hp_delta == 0
         assert outcome.max_hp_delta == 0
         assert city.eco == 1150
@@ -142,6 +143,32 @@ class TestSettlementPhase:
         assert village.eco == 575
         assert village.atk == 55
         assert village.dfn == 35
+
+    def test_eco_growth_rounds_up_fractional_amounts(self) -> None:
+        city = City(OffsetCoord(0, 0))
+        city.eco = 1150
+
+        outcome = city.on_settlement_phase_end()
+
+        assert outcome.action == "grew"
+        assert outcome.eco_delta == 158
+        assert city.eco == 1308
+
+    def test_eco_growth_capped_at_two_hundred_per_day(self) -> None:
+        city = City(OffsetCoord(0, 0))
+        city.eco = 5000
+
+        outcome = city.on_settlement_phase_end()
+
+        assert outcome.action == "grew"
+        assert outcome.eco_delta == 200
+        assert city.eco == 5200
+
+
+class TestComputeSettlementEcoGrowth:
+    def test_formula_ceil_and_cap(self) -> None:
+        assert compute_settlement_eco_growth(1150, 1000, 5) == 158
+        assert compute_settlement_eco_growth(5000, 1000, 5) == 200
 
 
 class TestSettlementRaidResolution:
@@ -186,7 +213,6 @@ class TestSettlementRaidResolution:
             settlement,
             world,
             [settlement],
-            map_width=10,
             citadel_coord=coord,
         )
 
@@ -255,7 +281,6 @@ class TestSettlementCombat:
             should_continue,
             citadel_coord=OffsetCoord(0, 0),
             settlements=[settlement, nearby],
-            map_width=10,
         )
 
         assert result.rounds_resolved == 2
@@ -305,16 +330,16 @@ class TestRaidDefeat:
         outside = Fort(OffsetCoord(4, 0))
         settlements = [defeated, nearby, outside]
 
-        events = defeated.on_raid_defeat(settlements, map_width=10)
+        events = defeated.on_raid_defeat(settlements)
 
-        assert nearby_aggression_radius(10) == 3
+        assert raid_spill_aggression_amount(2, dropoff=10) == 280
         assert events == []
-        assert defeated.eco == 500
+        assert defeated.eco == 400
         assert defeated.atk == 64
         assert defeated.dfn == 74
         assert defeated.aggression == 300
-        assert nearby.aggression == 150
-        assert outside.aggression == 0
+        assert nearby.aggression == 280
+        assert outside.aggression == 260
 
     def test_threshold_spawn_resets_aggression(self) -> None:
         fort = Fort(OffsetCoord(4, 4), aggression=250)

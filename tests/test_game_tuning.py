@@ -19,8 +19,10 @@ from dragonflight.game_tuning import (
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.settlement import (
     SETTLEMENT_GROWTH_STAT_BONUS,
+    City,
     Village,
-    nearby_aggression_radius,
+    max_spill_distance,
+    raid_spill_aggression_amount,
 )
 
 
@@ -39,7 +41,7 @@ class TestDifficultyPresets:
             "easy": {
                 "army_movement_speed": 8,
                 "heroes_party_cities_per_wave": 1,
-                "nearby_radius_map_width_percent": 15,
+                "raid_aggression_dropoff_per_tile": 20,
                 "settlement_growth_eco_percent": 10,
                 "raid_eco_loss_divisor": 1.5,
                 "raid_stat_loss": 10,
@@ -50,7 +52,7 @@ class TestDifficultyPresets:
             "normal": {
                 "army_movement_speed": 12,
                 "heroes_party_cities_per_wave": 2,
-                "nearby_radius_map_width_percent": 30,
+                "raid_aggression_dropoff_per_tile": 10,
                 "settlement_growth_eco_percent": 5,
                 "raid_eco_loss_divisor": 2.0,
                 "raid_stat_loss": 6,
@@ -61,7 +63,7 @@ class TestDifficultyPresets:
             "hard": {
                 "army_movement_speed": 16,
                 "heroes_party_cities_per_wave": 3,
-                "nearby_radius_map_width_percent": 50,
+                "raid_aggression_dropoff_per_tile": 5,
                 "settlement_growth_eco_percent": 0,
                 "raid_eco_loss_divisor": 3.0,
                 "raid_stat_loss": 3,
@@ -77,7 +79,7 @@ class TestDifficultyPresets:
         normal = GameTuning(
             army_movement_speed=0,
             heroes_party_cities_per_wave=0,
-            nearby_radius_map_width_percent=0,
+            raid_aggression_dropoff_per_tile=0,
             settlement_heal_percent_of_max_at_zero=0,
             settlement_heal_percent_of_max_when_damaged=0,
             settlement_growth_eco_percent=0,
@@ -167,7 +169,7 @@ class TestRaidDefeatTuning:
         defeated.eco = 1000
         defeated.atk = 50
 
-        defeated.on_raid_defeat([], map_width=10, tuning=soft)
+        defeated.on_raid_defeat([], tuning=soft)
 
         assert defeated.eco == 100
         assert defeated.atk == 49
@@ -178,18 +180,45 @@ class TestRaidDefeatTuning:
         defeated.hp = 0
         defeated.eco = 1000
 
-        defeated.on_raid_defeat([], map_width=10, tuning=easy)
+        defeated.on_raid_defeat([], tuning=easy)
 
         assert defeated.eco == 666
 
 
-class TestNearbyRadiusTuning:
-    def test_nearby_aggression_radius_scales_with_tuning_percent(self) -> None:
-        narrow = replace(_baseline_tuning(), nearby_radius_map_width_percent=10)
-        wide = replace(_baseline_tuning(), nearby_radius_map_width_percent=50)
+class TestRaidAggressionDropoffTuning:
+    def test_raid_spill_amount_scales_with_dropoff(self) -> None:
+        steep = replace(_baseline_tuning(), raid_aggression_dropoff_per_tile=20)
+        gentle = replace(_baseline_tuning(), raid_aggression_dropoff_per_tile=5)
 
-        assert nearby_aggression_radius(100, tuning=narrow) == 10
-        assert nearby_aggression_radius(100, tuning=wide) == 50
+        assert (
+            raid_spill_aggression_amount(2, dropoff=steep.raid_aggression_dropoff_per_tile) == 260
+        )
+        assert (
+            raid_spill_aggression_amount(2, dropoff=gentle.raid_aggression_dropoff_per_tile) == 290
+        )
+
+    def test_max_spill_distance_matches_normal_preset(self) -> None:
+        t = _baseline_tuning()
+        assert t.raid_aggression_dropoff_per_tile == 10
+        assert max_spill_distance(t.raid_aggression_dropoff_per_tile) == 29
+        assert raid_spill_aggression_amount(30, dropoff=t.raid_aggression_dropoff_per_tile) == 0
+
+    def test_validate_rejects_dropoff_out_of_range(self) -> None:
+        low = replace(_baseline_tuning(), raid_aggression_dropoff_per_tile=0)
+        high = replace(_baseline_tuning(), raid_aggression_dropoff_per_tile=51)
+        with pytest.raises(ValueError, match="raid_aggression_dropoff_per_tile"):
+            low.validate()
+        with pytest.raises(ValueError, match="raid_aggression_dropoff_per_tile"):
+            high.validate()
+
+    def test_on_raid_defeat_spill_follows_custom_dropoff(self) -> None:
+        hard = replace(_baseline_tuning(), raid_aggression_dropoff_per_tile=5)
+        defeated = City(OffsetCoord(0, 0))
+        nearby = Village(OffsetCoord(1, 0))
+
+        defeated.on_raid_defeat([defeated, nearby], tuning=hard)
+
+        assert nearby.aggression == raid_spill_aggression_amount(1, dropoff=5)
 
 
 class TestArmySpawnSpeedTuning:

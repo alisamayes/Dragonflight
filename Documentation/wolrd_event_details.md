@@ -28,4 +28,6 @@ id: heavy_rain
 desc: "The clouds are dark and rain falls hard and heavy. The water coating everyting makes it harder to burn, but the settlements below rejoice as their crops are well provided for, drinking from the damp earth.
 effect: Dragon deals -15% damage for today and settlements eco growth is 150% of normal for this turn.
 
-id: 
+id: arcane_fog
+desc: "Strange fog cloaks the land as tendrils of mist snake over the hills and through the forests, obscuring everything below. Otherworldy noises come from the fog that dont quite sound right and its as if the land is moving. You find it difficult to see anything around you and the fog extends to your mind, removing even the memories of the landscape below. What could be causing this?"
+effect: reapply the fog of war to the whole map just like it is at the start of the game. 

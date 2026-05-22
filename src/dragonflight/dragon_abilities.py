@@ -9,12 +9,27 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .combat_math import damage_dragon_attacks
 from .dragon_defaults import HOURS_PER_DRAGON_DAY
+from .entity_stats import (
+    ModifierExpiry,
+    ModifierKind,
+    StatKey,
+    StatModifier,
+    StatModifierBag,
+    add_modifier,
+    clear_day_end,
+    flat_add_total_for_source,
+    hours_remaining_for_source,
+    read_base,
+    read_effective,
+    remove_modifiers_by_source,
+    tick_hours,
+)
 from .hex_coord import OffsetCoord, distance, offset_to_axial
 from .terrain import Terrain
 
@@ -30,11 +45,22 @@ SPIKED_SCALES_DEFENCE_PERCENT: int = 15
 HEALING_CRYSTAL_PERCENT_PER_HOUR: float = 2.0
 FORESIGHT_DAMAGE_UNDO_PERCENT: int = 10
 ICE_TALONS_ATTACK_REDUCTION_PERCENT: int = 10
+ICE_TALONS_ATTACK_MULTIPLIER: float = 1.0 - ICE_TALONS_ATTACK_REDUCTION_PERCENT / 100.0
+ICE_TALONS_SOURCE: str = "Ice Talons"
+ANCIENTS_ROAR_ATTACK_MULTIPLIER: float = 0.70
+ANCIENTS_ROAR_DURATION_HOURS: float = 12.0
+ANCIENTS_ROAR_SOURCE: str = "Ancient's Roar"
+# Ice Talons stacks persist for the settlement/army lifetime (not dragon-hour synced).
+ICE_TALONS_MODIFIER_HOURS: float = 1_000_000.0
 MOUNTAINS_BOON_RANGE_HEXES: int = 3
 MOUNTAINS_BOON_ATTACK_MULTIPLIER: float = 1.10
 MOUNTAINS_BOON_SPEED_BONUS: float = 2.0
 FIERY_MALICE_MULTIPLIER: float = 1.50
+DEFEND_THE_CITADEL_DEFENCE_MULTIPLIER: float = 1.50
 DEFEND_THE_CITADEL_TRAVEL_DIVISOR: float = 3.0
+FIERY_MALICE_DURATION_HOURS: float = 3.0
+DEFEND_THE_CITADEL_DURATION_HOURS: float = 3.0
+VIVIFY_MAX_HP_SOURCE: str = "Vivify max hp"
 VIVIFY_HP_BONUS_PERCENT: int = 20
 VIVIFY_ATTACK_SACRIFICE_PERCENT: int = 10
 VIVIFY_SACRIFICE_DURATION_HOURS: float = 5.0
@@ -100,7 +126,9 @@ def extra_charges_remaining(dragon: Dragon, ability_name: str) -> int:
 
 
 def active_effect_hours_remaining(dragon: Dragon, effect_name: str) -> float:
-    return max(0.0, float(dragon.active_ability_hours.get(effect_name, 0.0)))
+    bag_hours = hours_remaining_for_source(dragon.stat_modifiers, effect_name)
+    legacy = max(0.0, float(dragon.active_ability_hours.get(effect_name, 0.0)))
+    return max(bag_hours, legacy)
 
 
 def begin_new_turn(dragon: Dragon) -> None:
@@ -115,13 +143,8 @@ def begin_new_turn(dragon: Dragon) -> None:
     dragon.ability_extra_charges_today.clear()
     dragon.active_ability_hours.clear()
     dragon.passive_stacks["Flame buffer"] = 0
-    vivify_bonus = int(dragon.passive_stacks.pop("Vivify max hp bonus", 0))
-    if vivify_bonus > 0:
-        old_max = dragon.max_hp
-        dragon.max_hp = max(1, dragon.max_hp - vivify_bonus)
-        dragon.hp = min(dragon.hp, dragon.max_hp)
-        if old_max <= vivify_bonus:
-            dragon.hp = max(0, dragon.hp)
+    clear_day_end(dragon.stat_modifiers)
+    dragon.hp = min(dragon.hp, effective_max_hp(dragon))
 
 
 def _cooldown_block(dragon: Dragon, spec: DragonAbilitySpec) -> AbilityUseResult | None:
@@ -183,7 +206,7 @@ def try_use_ability(
         assert target is not None
         result = _plasma_lance(dragon, world, settlements_by_coord, target, armies_by_coord)
     elif spec.name == "Fiery Malice":
-        dragon.active_ability_hours[spec.name] = 3.0
+        _apply_fiery_malice_modifiers(dragon)
         dragon.ability_extra_charges_today["Plasma Lance"] = (
             dragon.ability_extra_charges_today.get("Plasma Lance", 0) + 1
         )
@@ -193,27 +216,32 @@ def try_use_ability(
     elif spec.name == "Ancient's Roar":
         affected = _ancients_roar(dragon, settlements_by_coord, armies_by_coord)
         dragon.active_ability_hours[spec.name] = 12.0
-        result = AbilityUseResult(
-            True, f"Ancient's Roar weakened {affected} target(s).", spec.name
-        )
+        result = AbilityUseResult(True, f"Ancient's Roar weakened {affected} target(s).", spec.name)
     elif spec.name == "Defend the Citadel":
         result = _defend_the_citadel(dragon, citadel_coord)
     elif spec.name == "Draconic Resurgence":
-        if dragon.hp >= dragon.max_hp // 2:
+        cap = effective_max_hp(dragon)
+        if dragon.hp >= cap // 2:
             return AbilityUseResult(False, "Draconic Resurgence requires HP below 50%.", spec.name)
-        healed = max(1, dragon.max_hp * 25 // 100)
-        dragon.hp = min(dragon.max_hp, dragon.hp + healed)
+        healed = max(1, cap * 25 // 100)
+        dragon.hp = min(cap, dragon.hp + healed)
         dragon.active_ability_hours[spec.name] = 5.0
         result = AbilityUseResult(
             True, f"Restored {healed} HP; passive healing doubled for 5 hours.", spec.name
         )
     elif spec.name == "Vivify":
-        bonus = max(1, dragon.max_hp * VIVIFY_HP_BONUS_PERCENT // 100)
-        dragon.max_hp += bonus
-        dragon.hp += bonus
-        dragon.passive_stacks["Vivify max hp bonus"] = (
-            dragon.passive_stacks.get("Vivify max hp bonus", 0) + bonus
+        bonus = max(1, int(read_base(dragon, StatKey.MAX_HP)) * VIVIFY_HP_BONUS_PERCENT // 100)
+        add_modifier(
+            dragon.stat_modifiers,
+            StatModifier(
+                stat=StatKey.MAX_HP,
+                kind=ModifierKind.FLAT_ADD,
+                value=float(bonus),
+                expiry=ModifierExpiry.DAY_END,
+                source=VIVIFY_MAX_HP_SOURCE,
+            ),
         )
+        dragon.hp += bonus
         dragon.active_ability_hours[VIVIFY_SACRIFICE_EFFECT_NAME] = VIVIFY_SACRIFICE_DURATION_HOURS
         result = AbilityUseResult(
             True,
@@ -297,6 +325,27 @@ def _plasma_lance(
     )
 
 
+def _apply_enemy_attack_debuff(
+    bag: StatModifierBag,
+    *,
+    hours: float,
+    source: str,
+    multiplier: float,
+) -> None:
+    remove_modifiers_by_source(bag, source)
+    add_modifier(
+        bag,
+        StatModifier(
+            stat=StatKey.ATK,
+            kind=ModifierKind.PERCENT_MULT,
+            value=multiplier,
+            expiry=ModifierExpiry.HOURS,
+            hours_remaining=hours,
+            source=source,
+        ),
+    )
+
+
 def _ancients_roar(
     dragon: Dragon,
     settlements_by_coord: Mapping[OffsetCoord, Settlement],
@@ -306,16 +355,28 @@ def _ancients_roar(
     flight = effective_flight_range(dragon)
     for settlement in settlements_by_coord.values():
         if dragon.hex_distance_to(settlement.position) <= flight:
-            settlement.atk = max(0, int(math.floor(settlement.atk * 0.70)))
+            _apply_enemy_attack_debuff(
+                settlement.stat_modifiers,
+                hours=ANCIENTS_ROAR_DURATION_HOURS,
+                source=ANCIENTS_ROAR_SOURCE,
+                multiplier=ANCIENTS_ROAR_ATTACK_MULTIPLIER,
+            )
             affected += 1
     if armies_by_coord is not None:
+        from .army import Army
+
         for army in armies_by_coord.values():
             pos = getattr(army, "position", None)
             if pos is None or dragon.hex_distance_to(pos) > flight:
                 continue
-            atk = int(getattr(army, "atk", 0))
-            setattr(army, "atk", max(0, int(math.floor(atk * 0.70))))
-            affected += 1
+            if isinstance(army, Army):
+                _apply_enemy_attack_debuff(
+                    army.stat_modifiers,
+                    hours=ANCIENTS_ROAR_DURATION_HOURS,
+                    source=ANCIENTS_ROAR_SOURCE,
+                    multiplier=ANCIENTS_ROAR_ATTACK_MULTIPLIER,
+                )
+                affected += 1
     return affected
 
 
@@ -333,7 +394,7 @@ def _defend_the_citadel(dragon: Dragon, citadel_coord: OffsetCoord) -> AbilityUs
     dragon.position = citadel_coord
     dragon.hours_remaining -= travel_hours
     apply_time_spent(dragon, travel_hours)
-    dragon.active_ability_hours["Defend the Citadel"] = 3.0
+    _apply_defend_the_citadel_modifiers(dragon)
     return AbilityUseResult(
         True,
         f"Returned to citadel in {travel_hours:.1f}h; defence boosted for 3h.",
@@ -483,7 +544,13 @@ def _append_unique_coord(
         store[key] = (*coords, coord)
 
 
-def apply_time_spent(dragon: Dragon, hours: float) -> None:
+def apply_time_spent(
+    dragon: Dragon,
+    hours: float,
+    *,
+    settlements: Iterable[Settlement] | None = None,
+    armies: Iterable[object] | None = None,
+) -> None:
     """Apply passive healing and tick active effect durations for spent time."""
 
     spent = max(0.0, float(hours))
@@ -499,15 +566,27 @@ def apply_time_spent(dragon: Dragon, hours: float) -> None:
         if name == "Timestop":
             continue
         _set_or_clear_effect(dragon, name, remaining - spent)
+    tick_hours(dragon.stat_modifiers, spent)
+    from .entity_stats import tick_modifier_bags
+
+    enemy_bags: list[StatModifierBag] = []
+    if settlements is not None:
+        enemy_bags.extend(s.stat_modifiers for s in settlements)
+    if armies is not None:
+        from .army import Army
+
+        for army in armies:
+            if isinstance(army, Army):
+                enemy_bags.append(army.stat_modifiers)
+    tick_modifier_bags(enemy_bags, spent)
     if passive_active(dragon, "Healing Crystal"):
         multiplier = (
             2.0 if active_effect_hours_remaining(dragon, "Draconic Resurgence") > 0 else 1.0
         )
-        healing = int(
-            round(dragon.max_hp * HEALING_CRYSTAL_PERCENT_PER_HOUR / 100.0 * spent * multiplier)
-        )
+        cap = effective_max_hp(dragon)
+        healing = int(round(cap * HEALING_CRYSTAL_PERCENT_PER_HOUR / 100.0 * spent * multiplier))
         if healing > 0:
-            dragon.hp = min(dragon.max_hp, dragon.hp + healing)
+            dragon.hp = min(cap, dragon.hp + healing)
 
 
 def _set_or_clear_effect(dragon: Dragon, name: str, hours: float) -> None:
@@ -530,44 +609,86 @@ def on_combat_ended(dragon: Dragon) -> None:
     pass
 
 
+def mountain_boon_extra_modifiers(
+    dragon: Dragon, *, world: GameMap | None
+) -> tuple[StatModifier, ...]:
+    """Ephemeral modifiers when Mountain's Boon terrain condition is met."""
+
+    if world is None or not passive_active(dragon, "Mountain's Boon"):
+        return ()
+    if not _mountain_nearby(dragon, world):
+        return ()
+    return (
+        StatModifier(
+            stat=StatKey.ATK,
+            kind=ModifierKind.PERCENT_MULT,
+            value=MOUNTAINS_BOON_ATTACK_MULTIPLIER,
+            expiry=ModifierExpiry.HOURS,
+            source="Mountain's Boon",
+        ),
+        StatModifier(
+            stat=StatKey.SPEED,
+            kind=ModifierKind.FLAT_ADD,
+            value=MOUNTAINS_BOON_SPEED_BONUS,
+            expiry=ModifierExpiry.HOURS,
+            source="Mountain's Boon",
+        ),
+    )
+
+
+def _apply_fiery_malice_modifiers(dragon: Dragon) -> None:
+    remove_modifiers_by_source(dragon.stat_modifiers, "Fiery Malice")
+    for stat in (StatKey.ATK, StatKey.FLIGHT_RANGE, StatKey.SPEED):
+        add_modifier(
+            dragon.stat_modifiers,
+            StatModifier(
+                stat=stat,
+                kind=ModifierKind.PERCENT_MULT,
+                value=FIERY_MALICE_MULTIPLIER,
+                expiry=ModifierExpiry.HOURS,
+                hours_remaining=FIERY_MALICE_DURATION_HOURS,
+                source="Fiery Malice",
+            ),
+        )
+
+
+def _apply_defend_the_citadel_modifiers(dragon: Dragon) -> None:
+    remove_modifiers_by_source(dragon.stat_modifiers, "Defend the Citadel")
+    add_modifier(
+        dragon.stat_modifiers,
+        StatModifier(
+            stat=StatKey.DFN,
+            kind=ModifierKind.PERCENT_MULT,
+            value=DEFEND_THE_CITADEL_DEFENCE_MULTIPLIER,
+            expiry=ModifierExpiry.HOURS,
+            hours_remaining=DEFEND_THE_CITADEL_DURATION_HOURS,
+            source="Defend the Citadel",
+        ),
+    )
+
+
+def effective_max_hp(dragon: Dragon) -> int:
+    return int(read_effective(dragon, dragon.stat_modifiers, StatKey.MAX_HP))
+
+
 def effective_attack(dragon: Dragon, *, world: GameMap | None = None) -> int:
-    attack = float(dragon.atk)
-    if active_effect_hours_remaining(dragon, "Fiery Malice") > 0:
-        attack *= FIERY_MALICE_MULTIPLIER
-    if (
-        world is not None
-        and passive_active(dragon, "Mountain's Boon")
-        and _mountain_nearby(dragon, world)
-    ):
-        attack *= MOUNTAINS_BOON_ATTACK_MULTIPLIER
-    return max(1, int(round(attack)))
+    extras = mountain_boon_extra_modifiers(dragon, world=world)
+    return int(read_effective(dragon, dragon.stat_modifiers, StatKey.ATK, extra_modifiers=extras))
 
 
 def effective_defence(dragon: Dragon) -> int:
-    defence = float(dragon.dfn)
-    if active_effect_hours_remaining(dragon, "Defend the Citadel") > 0:
-        defence *= FIERY_MALICE_MULTIPLIER
-    return max(0, int(round(defence)))
+    return int(read_effective(dragon, dragon.stat_modifiers, StatKey.DFN))
 
 
 def effective_flight_range(dragon: Dragon) -> int:
-    value = float(dragon.flight_range_hexes)
-    if active_effect_hours_remaining(dragon, "Fiery Malice") > 0:
-        value *= FIERY_MALICE_MULTIPLIER
-    return max(0, int(math.floor(value)))
+    return int(read_effective(dragon, dragon.stat_modifiers, StatKey.FLIGHT_RANGE))
 
 
 def effective_speed_hexes_per_hour(dragon: Dragon, *, world: GameMap | None = None) -> float:
-    speed = float(dragon.speed_hexes_per_hour)
-    if active_effect_hours_remaining(dragon, "Fiery Malice") > 0:
-        speed *= FIERY_MALICE_MULTIPLIER
-    if (
-        world is not None
-        and passive_active(dragon, "Mountain's Boon")
-        and _mountain_nearby(dragon, world)
-    ):
-        speed += MOUNTAINS_BOON_SPEED_BONUS
-    return max(0.001, speed)
+    extras = mountain_boon_extra_modifiers(dragon, world=world)
+    return float(
+        read_effective(dragon, dragon.stat_modifiers, StatKey.SPEED, extra_modifiers=extras)
+    )
 
 
 def _mountain_nearby(dragon: Dragon, world: GameMap) -> bool:
@@ -638,21 +759,48 @@ def vivify_attack_bonus(dragon: Dragon) -> int:
     return sacrifice * 2
 
 
+def _ice_talons_stack_count(bag: StatModifierBag) -> int:
+    return sum(
+        1
+        for mod in bag.modifiers
+        if mod.source == ICE_TALONS_SOURCE and mod.stat is StatKey.ATK
+    )
+
+
+def _apply_ice_talons_stack(bag: StatModifierBag) -> None:
+    """Stack −10% on combat ATK via one compounded modifier (base ``atk`` unchanged)."""
+
+    stacks = _ice_talons_stack_count(bag) + 1
+    remove_modifiers_by_source(bag, ICE_TALONS_SOURCE)
+    add_modifier(
+        bag,
+        StatModifier(
+            stat=StatKey.ATK,
+            kind=ModifierKind.PERCENT_MULT,
+            value=ICE_TALONS_ATTACK_MULTIPLIER**stacks,
+            expiry=ModifierExpiry.HOURS,
+            hours_remaining=ICE_TALONS_MODIFIER_HOURS,
+            source=ICE_TALONS_SOURCE,
+        ),
+    )
+
+
+def _enemy_stat_modifier_bag(target: object) -> StatModifierBag | None:
+    bag = getattr(target, "stat_modifiers", None)
+    return bag if isinstance(bag, StatModifierBag) else None
+
+
 def apply_ice_talons_to_settlement(dragon: Dragon, settlement: Settlement) -> None:
     if passive_active(dragon, "Ice Talons"):
-        settlement.atk = max(
-            0, int(math.floor(settlement.atk * (1.0 - ICE_TALONS_ATTACK_REDUCTION_PERCENT / 100.0)))
-        )
+        _apply_ice_talons_stack(settlement.stat_modifiers)
 
 
 def apply_ice_talons_to_army(dragon: Dragon, army: object) -> None:
-    if passive_active(dragon, "Ice Talons"):
-        atk = int(getattr(army, "atk", 0))
-        setattr(
-            army,
-            "atk",
-            max(0, int(math.floor(atk * (1.0 - ICE_TALONS_ATTACK_REDUCTION_PERCENT / 100.0)))),
-        )
+    if not passive_active(dragon, "Ice Talons"):
+        return
+    bag = _enemy_stat_modifier_bag(army)
+    if bag is not None:
+        _apply_ice_talons_stack(bag)
 
 
 def enemy_defence_for_round(dragon: Dragon, position: OffsetCoord, base_dfn: int) -> int:
@@ -662,7 +810,22 @@ def enemy_defence_for_round(dragon: Dragon, position: OffsetCoord, base_dfn: int
 
 
 def settlement_defence_for_round(dragon: Dragon, settlement: Settlement) -> int:
-    return enemy_defence_for_round(dragon, settlement.position, settlement.dfn)
+    from .combatant_stats import settlement_effective_dfn
+
+    return enemy_defence_for_round(
+        dragon,
+        settlement.position,
+        settlement_effective_dfn(settlement),
+    )
+
+
+def army_defence_for_round(dragon: Dragon, army: object) -> int:
+    from .army import Army
+    from .combatant_stats import army_effective_dfn
+
+    if not isinstance(army, Army):
+        return 0
+    return enemy_defence_for_round(dragon, army.position, army_effective_dfn(army))
 
 
 def ability_status_label(dragon: Dragon, ability_name: str) -> str:
@@ -710,7 +873,9 @@ def ability_ui_detail_lines(
         multiplier = (
             2.0 if active_effect_hours_remaining(dragon, "Draconic Resurgence") > 0 else 1.0
         )
-        healing = int(round(dragon.max_hp * HEALING_CRYSTAL_PERCENT_PER_HOUR / 100.0 * multiplier))
+        healing = int(
+            round(effective_max_hp(dragon) * HEALING_CRYSTAL_PERCENT_PER_HOUR / 100.0 * multiplier)
+        )
         return [
             f"Heals {healing} HP per hour spent.",
             f"Base rate: {HEALING_CRYSTAL_PERCENT_PER_HOUR:g}% max HP/hour.",
@@ -749,17 +914,19 @@ def ability_ui_detail_lines(
             "Chrono-conic army slow TODO.",
         ]
     if spec.name == "Defend the Citadel":
-        percent = int(round((FIERY_MALICE_MULTIPLIER - 1.0) * 100))
+        percent = int(round((DEFEND_THE_CITADEL_DEFENCE_MULTIPLIER - 1.0) * 100))
         return [
             f"Return time is 1/{int(DEFEND_THE_CITADEL_TRAVEL_DIVISOR)} normal.",
             f"+{percent}% DFN for 3h.",
         ]
     if spec.name == "Draconic Resurgence":
-        heal = max(1, dragon.max_hp * 25 // 100)
+        heal = max(1, effective_max_hp(dragon) * 25 // 100)
         return [f"Usable below 50% HP; heals {heal} HP.", "Doubles Healing Crystal for 5h."]
     if spec.name == "Vivify":
-        active_bonus = int(dragon.passive_stacks.get("Vivify max hp bonus", 0))
-        base_max_hp = max(1, dragon.max_hp - active_bonus)
+        active_bonus = flat_add_total_for_source(
+            dragon.stat_modifiers, VIVIFY_MAX_HP_SOURCE, StatKey.MAX_HP
+        )
+        base_max_hp = max(1, int(read_base(dragon, StatKey.MAX_HP)))
         next_bonus = max(1, base_max_hp * VIVIFY_HP_BONUS_PERCENT // 100)
         sacrifice = dragon.hp * VIVIFY_ATTACK_SACRIFICE_PERCENT // 100
         power = sacrifice * 2
@@ -796,16 +963,22 @@ __all__ = [
     "ability_status_label",
     "ability_ui_detail_lines",
     "ability_spec_by_name",
+    "ANCIENTS_ROAR_SOURCE",
     "apply_ice_talons_to_army",
     "apply_ice_talons_to_settlement",
+    "army_defence_for_round",
     "apply_time_spent",
     "begin_new_turn",
     "cooldown_remaining",
     "cooldown_turns_from_text",
+    "DEFEND_THE_CITADEL_DEFENCE_MULTIPLIER",
     "effective_attack",
     "effective_defence",
     "effective_flight_range",
+    "effective_max_hp",
     "effective_speed_hexes_per_hour",
+    "mountain_boon_extra_modifiers",
+    "VIVIFY_MAX_HP_SOURCE",
     "enemy_can_retaliate",
     "enemy_defence_for_round",
     "mitigated_damage_taken",

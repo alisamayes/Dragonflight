@@ -78,7 +78,7 @@ class Redgon(Dragon):
             max_hp=500,
             atk=120,
             dfn=90,
-            flight_range_hexes=15,
+            flight_range_hexes=7,
             speed_hexes_per_hour=8.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
@@ -137,7 +137,7 @@ class Blackgon(Dragon):
             max_hp=500,
             atk=100,
             dfn=140,
-            flight_range_hexes=10,
+            flight_range_hexes=5,
             speed_hexes_per_hour=4.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
@@ -186,11 +186,11 @@ class Greengon(Dragon):
             kind=DragonKind.GREEN_LIFE,
             position=citadel_coord,
             level=DEFAULT_DRAGON_LEVEL,
-            hp=600,
+            hp=650,
             max_hp=600,
-            atk=80,
+            atk=90,
             dfn=100,
-            flight_range_hexes=10,
+            flight_range_hexes=6,
             speed_hexes_per_hour=6.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
@@ -246,7 +246,7 @@ class Yellowgon(Dragon):
             max_hp=500,
             atk=90,
             dfn=90,
-            flight_range_hexes=12,
+            flight_range_hexes=5,
             speed_hexes_per_hour=5.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
@@ -269,7 +269,7 @@ class Purplegon(Dragon):
             "No CD",
             "Constant",
             "Ice Talons",
-            "Each hit reduces enemy attack by 10% (stacking interpretation TBD at combat sim).",
+            "Each hit reduces enemy combat ATK by 10% (stacks; base ATK unchanged).",
         ),
         DragonAbilitySpec(
             10,
@@ -302,7 +302,7 @@ class Purplegon(Dragon):
             max_hp=500,
             atk=120,
             dfn=120,
-            flight_range_hexes=8,
+            flight_range_hexes=4,
             speed_hexes_per_hour=4.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
@@ -358,7 +358,7 @@ class Browngon(Dragon):
             max_hp=550,
             atk=100,
             dfn=110,
-            flight_range_hexes=8,
+            flight_range_hexes=4,
             speed_hexes_per_hour=2.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )

@@ -13,6 +13,7 @@ from typing import Any
 
 import pygame
 
+from .combatant_stats import dragon_combatant_view
 from .dragon import Dragon
 from .dragon_abilities import (
     ability_button_enabled,
@@ -83,15 +84,16 @@ __all__ = [
 ]
 
 
-def min_dragon_panel_column_width(
-    font: pygame.font.Font, font_small: pygame.font.Font
-) -> int:
+def min_dragon_panel_column_width(font: pygame.font.Font, font_small: pygame.font.Font) -> int:
     """Content-based minimum width for the dragon stats column (padding + widest sample lines)."""
 
     pad = 12
     header_w = max_text_pixel_width(font, ("Dragon",))
     kind_w = max(
-        (max_text_pixel_width(font_small, (display_name_for_kind(k),)) for k in playable_dragon_kinds()),
+        (
+            max_text_pixel_width(font_small, (display_name_for_kind(k),))
+            for k in playable_dragon_kinds()
+        ),
         default=0,
     )
     body_lines = (
@@ -142,9 +144,7 @@ def inspector_panel_raw_min_column_width(
     return inner + 2 * pad
 
 
-def min_inspector_panel_column_width(
-    font: pygame.font.Font, font_small: pygame.font.Font
-) -> int:
+def min_inspector_panel_column_width(font: pygame.font.Font, font_small: pygame.font.Font) -> int:
     """Content-based minimum width for the tile inspector column (scaled)."""
 
     raw = inspector_panel_raw_min_column_width(font, font_small)
@@ -214,10 +214,9 @@ def draw_dragon_panel(
     if layout.is_visible(line_h_small):
         draw_text(surface, font_small, "Base Stats", (layout.x, layout.screen_y()), _UI_TEXT_RGB)
     layout.advance(line_gap)
-    vivify_bonus = int(dragon.passive_stacks.get("Vivify max hp bonus", 0))
-    base_max_hp = max(1, dragon.max_hp - vivify_bonus)
+    view = dragon_combatant_view(dragon, world=world)
     base_stats = (
-        f"HP: {dragon.hp} / {base_max_hp}",
+        f"HP: {dragon.hp} / {view.base_max_hp}",
         f"ATK: {dragon.atk}  |  DFN: {dragon.dfn}",
         f"Flight range: {dragon.flight_range_hexes} hexes",
         f"Speed: {dragon.speed_hexes_per_hour:g} hex/h",
@@ -237,7 +236,7 @@ def draw_dragon_panel(
     combat_speed = effective_speed_hexes_per_hour(dragon, world=world)
     boosted_rgb = (170, 230, 170)
     combat_lines = (
-        (f"HP: {dragon.hp} / {dragon.max_hp}", dragon.max_hp > base_max_hp),
+        (f"HP: {dragon.hp} / {view.effective_max_hp}", view.max_hp_boosted),
         (
             f"ATK: {combat_atk}  |  DFN: {combat_dfn}",
             combat_atk > dragon.atk or combat_dfn > dragon.dfn,
@@ -672,9 +671,7 @@ def draw_tile_inspector_panel(
         layout.advance(line_gap)
     else:
         if not is_revealed(fog_of_war, inspector_focus_coord):
-            coord_label = (
-                f"Offset col {inspector_focus_coord.col}, row {inspector_focus_coord.row}"
-            )
+            coord_label = f"Offset col {inspector_focus_coord.col}, row {inspector_focus_coord.row}"
             if layout.is_visible(line_h_small):
                 draw_text(
                     surface,
@@ -694,12 +691,14 @@ def draw_tile_inspector_panel(
                         _UI_TEXT_RGB,
                     )
                 layout.advance(line_gap)
-        elif (info := tile_inspect_info(
-            game_map,
-            inspector_focus_coord,
-            settlements_by_coord,
-            armies_by_coord=armies_by_coord,
-        )) is None:
+        elif (
+            info := tile_inspect_info(
+                game_map,
+                inspector_focus_coord,
+                settlements_by_coord,
+                armies_by_coord=armies_by_coord,
+            )
+        ) is None:
             if layout.is_visible(line_h_small):
                 draw_text(
                     surface,

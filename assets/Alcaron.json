@@ -2937,10 +2937,12 @@
       "q": 5,
       "r": 21,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "custom-5c5b120e",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#fff705",
+      "settlementType": "fort"
     },
     "5,22,surface": {
       "q": 5,
@@ -3146,10 +3148,12 @@
       "q": 5,
       "r": 44,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "custom-5c5b120e",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#fff705",
+      "settlementType": "village"
     },
     "5,45,surface": {
       "q": 5,
@@ -14061,7 +14065,7 @@
       "q": 25,
       "r": 41,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14070,7 +14074,7 @@
       "q": 25,
       "r": 42,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14079,7 +14083,7 @@
       "q": 25,
       "r": 43,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14600,7 +14604,7 @@
       "q": 26,
       "r": 40,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14609,7 +14613,7 @@
       "q": 26,
       "r": 41,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14618,7 +14622,7 @@
       "q": 26,
       "r": 42,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14627,7 +14631,7 @@
       "q": 26,
       "r": 43,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -14636,7 +14640,7 @@
       "q": 26,
       "r": 44,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -15175,7 +15179,7 @@
       "q": 27,
       "r": 43,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -15643,7 +15647,7 @@
       "q": 28,
       "r": 34,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16181,7 +16185,7 @@
       "q": 29,
       "r": 33,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16190,7 +16194,7 @@
       "q": 29,
       "r": 34,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16208,7 +16212,7 @@
       "q": 29,
       "r": 36,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16217,7 +16221,7 @@
       "q": 29,
       "r": 37,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16235,11 +16239,10 @@
       "q": 29,
       "r": 39,
       "layer": "surface",
-      "hexType": "custom-0d9e6285",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
-      "connections": [],
-      "customColor": "#e31616"
+      "connections": []
     },
     "29,40,surface": {
       "q": 29,
@@ -16727,7 +16730,7 @@
       "q": 30,
       "r": 33,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16736,7 +16739,7 @@
       "q": 30,
       "r": 34,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16754,7 +16757,7 @@
       "q": 30,
       "r": 36,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -16763,7 +16766,7 @@
       "q": 30,
       "r": 37,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17265,7 +17268,7 @@
       "q": 31,
       "r": 32,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17274,7 +17277,7 @@
       "q": 31,
       "r": 33,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17283,7 +17286,7 @@
       "q": 31,
       "r": 34,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17292,7 +17295,7 @@
       "q": 31,
       "r": 35,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17301,10 +17304,11 @@
       "q": 31,
       "r": 36,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "custom-0d9e6285",
       "fogState": "visible",
       "edgeData": {},
-      "connections": []
+      "connections": [],
+      "customColor": "#e31616"
     },
     "31,37,surface": {
       "q": 31,
@@ -17810,7 +17814,7 @@
       "q": 32,
       "r": 32,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17819,7 +17823,7 @@
       "q": 32,
       "r": 33,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17846,7 +17850,7 @@
       "q": 32,
       "r": 36,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17855,7 +17859,7 @@
       "q": 32,
       "r": 37,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -17882,7 +17886,7 @@
       "q": 32,
       "r": 40,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18346,7 +18350,7 @@
       "q": 33,
       "r": 31,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18355,7 +18359,7 @@
       "q": 33,
       "r": 32,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18391,7 +18395,7 @@
       "q": 33,
       "r": 36,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18400,7 +18404,7 @@
       "q": 33,
       "r": 37,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18418,7 +18422,7 @@
       "q": 33,
       "r": 39,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18910,7 +18914,7 @@
       "q": 34,
       "r": 32,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18919,7 +18923,7 @@
       "q": 34,
       "r": 33,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18955,7 +18959,7 @@
       "q": 34,
       "r": 37,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18964,7 +18968,7 @@
       "q": 34,
       "r": 38,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -18982,7 +18986,7 @@
       "q": 34,
       "r": 40,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -19000,7 +19004,7 @@
       "q": 34,
       "r": 42,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -19516,7 +19520,7 @@
       "q": 35,
       "r": 37,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -19534,7 +19538,7 @@
       "q": 35,
       "r": 39,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -19543,7 +19547,7 @@
       "q": 35,
       "r": 40,
       "layer": "surface",
-      "hexType": "grassland",
+      "hexType": "mountain",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -19552,7 +19556,7 @@
       "q": 35,
       "r": 41,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -19561,7 +19565,7 @@
       "q": 35,
       "r": 42,
       "layer": "surface",
-      "hexType": "mountain",
+      "hexType": "grassland",
       "fogState": "visible",
       "edgeData": {},
       "connections": []
@@ -23805,11 +23809,11 @@
       "q": 43,
       "r": 19,
       "layer": "surface",
-      "hexType": "custom-river-0001",
+      "hexType": "custom-fe6e3b0a",
       "fogState": "visible",
       "edgeData": {},
       "connections": [],
-      "customColor": "#3a7bd5"
+      "customColor": "#8B4513"
     },
     "43,20,surface": {
       "q": 43,
@@ -32979,5 +32983,5 @@
   "activeLayer": "surface",
   "schemaVersion": 3,
   "createdAt": "2026-05-15T10:49:48.688Z",
-  "updatedAt": "2026-05-15T12:28:31.686Z"
+  "updatedAt": "2026-05-22T07:44:57.273Z"
 }

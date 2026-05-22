@@ -21,6 +21,8 @@ class ArmyInspectInfo:
     max_hp: int
     atk: int
     dfn: int
+    base_atk: int
+    base_dfn: int
     destroy_payout: int = 0
     display_name: str = "Army"
 
@@ -35,6 +37,8 @@ class SettlementInspectInfo:
     eco: int
     atk: int
     dfn: int
+    base_atk: int
+    base_dfn: int
     aggression: int
     aggression_threshold: int
 
@@ -58,6 +62,12 @@ class TileInspectorLine:
 
 
 UNKNOWN_TILE_LABEL = "Unknown"
+
+
+def _atk_dfn_inspector_line(base_atk: int, base_dfn: int, atk: int, dfn: int) -> str:
+    if atk == base_atk and dfn == base_dfn:
+        return f"Atk / Def: {atk} / {dfn}"
+    return f"Atk / Def: {atk} / {dfn} (base {base_atk} / {base_dfn})"
 
 
 def unknown_tile_inspector_lines() -> list[TileInspectorLine]:
@@ -95,7 +105,7 @@ def tile_inspector_lines(info: TileInspectInfo) -> list[TileInspectorLine]:
                 ),
                 TileInspectorLine(text=f"Eco: {s.eco}", kind="settlement"),
                 TileInspectorLine(
-                    text=f"Atk / Def: {s.atk} / {s.dfn}",
+                    text=_atk_dfn_inspector_line(s.base_atk, s.base_dfn, s.atk, s.dfn),
                     kind="settlement",
                 ),
                 TileInspectorLine(
@@ -121,7 +131,7 @@ def tile_inspector_lines(info: TileInspectInfo) -> list[TileInspectorLine]:
                     kind="army",
                 ),
                 TileInspectorLine(
-                    text=f"Atk / Def: {a.atk} / {a.dfn}",
+                    text=_atk_dfn_inspector_line(a.base_atk, a.base_dfn, a.atk, a.dfn),
                     kind="army",
                 ),
                 TileInspectorLine(
@@ -150,16 +160,36 @@ def army_display_name_for_kind(kind: ArmyKind | object | None) -> str:
 def army_inspect_info_from_entity(army: Any) -> ArmyInspectInfo | None:
     """Build inspector stats from a live army entity (simulation module or playtest stub)."""
 
+    from .army import Army
+    from .combatant_stats import army_combatant_view
+
     hp = int(getattr(army, "hp", 0))
     if hp <= 0:
         return None
+    if isinstance(army, Army):
+        view = army_combatant_view(army)
+        kind = army.kind
+        return ArmyInspectInfo(
+            hp=hp,
+            max_hp=int(army.max_hp),
+            atk=view.effective_atk,
+            dfn=view.effective_dfn,
+            base_atk=view.base_atk,
+            base_dfn=view.base_dfn,
+            destroy_payout=int(army.victory_gold),
+            display_name=army_display_name_for_kind(kind),
+        )
     max_hp = int(getattr(army, "max_hp", hp))
     kind = getattr(army, "kind", None)
+    atk = int(getattr(army, "atk", 0))
+    dfn = int(getattr(army, "dfn", 0))
     return ArmyInspectInfo(
         hp=hp,
         max_hp=max_hp,
-        atk=int(getattr(army, "atk", 0)),
-        dfn=int(getattr(army, "dfn", 0)),
+        atk=atk,
+        dfn=dfn,
+        base_atk=atk,
+        base_dfn=dfn,
         destroy_payout=int(getattr(army, "victory_gold", 0)),
         display_name=army_display_name_for_kind(kind),
     )
@@ -181,13 +211,18 @@ def tile_inspect_info(
     if tile.terrain is Terrain.SETTLEMENT:
         live = settlements_by_coord.get(coord)
         if live is not None:
+            from .combatant_stats import settlement_combatant_view
+
+            view = settlement_combatant_view(live)
             settlement_view = SettlementInspectInfo(
                 settlement_type=live.settlement_type,
                 hp=live.hp,
                 max_hp=live.max_hp,
                 eco=live.eco,
-                atk=live.atk,
-                dfn=live.dfn,
+                atk=view.effective_atk,
+                dfn=view.effective_dfn,
+                base_atk=view.base_atk,
+                base_dfn=view.base_dfn,
                 aggression=live.aggression,
                 aggression_threshold=live.aggression_threshold,
             )

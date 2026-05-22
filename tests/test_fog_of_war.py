@@ -68,7 +68,9 @@ def test_reveal_uses_effective_flight_range() -> None:
     origin = OffsetCoord(0, 0)
     dragon = Redgon.new_at(origin)
     dragon.flight_range_hexes = 2
-    dragon.active_ability_hours["Fiery Malice"] = 4.0
+    from dragonflight.dragon_abilities import _apply_fiery_malice_modifiers
+
+    _apply_fiery_malice_modifiers(dragon)
     game_map = _grid_map(8, 8)
     fog = FogOfWarState()
     flight = effective_flight_range(dragon)

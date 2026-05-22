@@ -6,15 +6,17 @@ from dataclasses import dataclass
 
 from .army import Army
 from .combat_math import damage_dragon_attacks, damage_settlement_or_army_attacks
+from .combatant_stats import army_effective_atk, settlement_effective_atk
 from .dragon import Dragon
 from .dragon_abilities import (
+    army_defence_for_round,
     effective_attack,
     effective_defence,
     enemy_can_retaliate,
-    enemy_defence_for_round,
     mitigated_damage_taken,
     preview_flame_buffer_damage_multiplier,
     preview_vivify_attack_power_bonus,
+    settlement_defence_for_round,
     thorns_damage,
 )
 from .map_state import GameMap
@@ -36,10 +38,12 @@ def preview_settlement_round(
     boosted_attack = max(
         1, int(round(base_attack * preview_flame_buffer_damage_multiplier(dragon)))
     )
-    dfn = enemy_defence_for_round(dragon, settlement.position, settlement.dfn)
+    dfn = settlement_defence_for_round(dragon, settlement)
     dragon_to_target = damage_dragon_attacks(boosted_attack, dfn)
     raw_to_dragon = (
-        damage_settlement_or_army_attacks(settlement.atk, effective_defence(dragon))
+        damage_settlement_or_army_attacks(
+            settlement_effective_atk(settlement), effective_defence(dragon)
+        )
         if enemy_can_retaliate(dragon)
         else 0
     )
@@ -58,10 +62,10 @@ def preview_army_round(dragon: Dragon, army: Army, world: GameMap) -> CombatDama
     boosted_attack = max(
         1, int(round(base_attack * preview_flame_buffer_damage_multiplier(dragon)))
     )
-    dfn = enemy_defence_for_round(dragon, army.position, army.dfn)
+    dfn = army_defence_for_round(dragon, army)
     dragon_to_target = damage_dragon_attacks(boosted_attack, dfn)
     raw_to_dragon = (
-        damage_settlement_or_army_attacks(army.atk, effective_defence(dragon))
+        damage_settlement_or_army_attacks(army_effective_atk(army), effective_defence(dragon))
         if enemy_can_retaliate(dragon)
         else 0
     )

@@ -239,10 +239,10 @@ Direct attack:
 Nearby settlements:
 - Receive partial aggression increase when another settlement is attacked
 
-### Nearby aggression radius (configurable)
-- In the Game Options screen (movement playtest main menu), the player can adjust how far “nearby” extends for aggression spillover, along with other game tuning scalars (see Section 23).
-- Shipped default (Normal preset): nearby settlements are those within a hex radius equal to 30% of map width, rounded (`nearby_aggression_radius` in code). Easy uses 15%; Hard uses 50%.
-- Use map width as the reference dimension unless later changed for specific map shapes
+### Raid aggression spill (distance dropoff, configurable)
+- When a settlement is defeated, other settlements receive spill aggression that decreases with hex distance from the defeated tile: `max(0, 300 - distance × dropoff_per_tile)` (300 is direct aggression on the defeated tile).
+- In Game Options (see Section 23), `raid_aggression_dropoff_per_tile` sets the per-hex subtractor. Normal preset = 10 (distance 30+ yields 0 spill); Easy = 20; Hard = 5.
+- Spill visits settlements in increasing hex distance and stops once a distance tier would add 0 aggression.
 
 If aggression exceeds threshold:
 - Settlement spawns an army
@@ -697,7 +697,7 @@ Applying a preset uses `apply_difficulty_preset()`, which does not change `settl
 | --- | ---: | ---: | ---: |
 | `army_movement_speed` | 8 | 12 | 16 |
 | `heroes_party_cities_per_wave` | 1 | 2 | 3 |
-| `nearby_radius_map_width_percent` | 15 | 30 | 50 |
+| `raid_aggression_dropoff_per_tile` | 20 | 10 | 5 |
 | `settlement_growth_eco_percent` | 10 | 5 | 0 |
 | `raid_eco_loss_divisor` | 1.5 | 2.0 | 3.0 |
 | `raid_stat_loss` | 10 | 6 | 3 |
@@ -712,7 +712,7 @@ Beyond presets, the Game Options panel exposes sliders (mins/max as implemented 
 | Tuning field | UI label (summary) |
 | --- | --- |
 | `army_movement_speed` | Army movement per day |
-| `nearby_radius_map_width_percent` | Settlement AOE aggression radius (% of map width) |
+| `raid_aggression_dropoff_per_tile` | Raid aggression dropoff (per hex) |
 | `settlement_growth_eco_percent` | Eco growth percent on current eco (see settlement growth formula, Section 6) |
 | `settlement_growth_stat_bonus` | Settlement ATK / DFN growth per growth tick |
 | `raid_eco_loss_divisor` | Settlement eco loss on defeat (divisor into current eco) |

@@ -37,6 +37,7 @@ from typing import Any, Literal
 
 import pygame
 
+from . import army_art
 from .army import (
     Army,
     ArmyKind,
@@ -45,11 +46,16 @@ from .army import (
     spawn_heroes_party_wave,
 )
 from .combat_preview import preview_army_round, preview_settlement_round
+from .combatant_stats import (
+    CombatantView,
+    entity_combatant_view,
+    entity_effective_atk,
+    entity_effective_dfn,
+)
+from .entity_stats import StatModifierBag
 from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from .dragon_abilities import on_combat_ended, try_use_ability
-from . import army_art
 from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
-from .tile_inspection import army_display_name_for_kind
 from .dragon_defaults import HOURS_PER_DRAGON_DAY
 from .dragon_playables import (
     default_playable_kind,
@@ -154,6 +160,7 @@ from .settlement import (
     validate_settlement_raid,
 )
 from .terrain import Terrain
+from .tile_inspection import army_display_name_for_kind
 from .world_settlements import settlements_by_coord_from_map
 
 # --- Layout -------------------------------------------------------------------
@@ -342,14 +349,39 @@ def _game_options_slider_defs() -> tuple[tuple[str, str, int | float, int | floa
 
     return (
         ("army_movement_speed", "Army movement per day", 1, 24),
-        ("nearby_radius_map_width_percent", "Settlement AOE agression radius (% of map width)", 0, 100),
-        ("settlement_growth_eco_percent", "Settlement eco growth: (x% of current eco) + (10% of starting eco)", 0, 100),
+        (
+            "raid_aggression_dropoff_per_tile",
+            "Raid aggression dropoff (per hex)",
+            1,
+            50,
+        ),
+        (
+            "settlement_growth_eco_percent",
+            "Settlement eco growth: (x% of current eco) + (10% of starting eco), max +200/day, rounded up",
+            0,
+            100,
+        ),
         ("settlement_growth_stat_bonus", "Settlement ATK / DFN growth", 0, 50),
         ("raid_eco_loss_divisor", "Settlement eco loss on defeat", 1.0, 10.0),
         ("raid_stat_loss", "Settlement stat loss on defeat (current eco / X)", 0, 50),
-        ("settlement_heal_percent_of_max_at_zero", "Settlement healing when destroyed/ raided (% of max HP)", 0, 100),
-        ("settlement_heal_percent_of_max_when_damaged","Settlement healing when partially damaged (% of max HP)",0,100),
-        ("dragon_citadel_end_of_day_base_heal_percent_of_max", "End-of-day dragon base heal (% of max HP)", 0, 100),
+        (
+            "settlement_heal_percent_of_max_at_zero",
+            "Settlement healing when destroyed/ raided (% of max HP)",
+            0,
+            100,
+        ),
+        (
+            "settlement_heal_percent_of_max_when_damaged",
+            "Settlement healing when partially damaged (% of max HP)",
+            0,
+            100,
+        ),
+        (
+            "dragon_citadel_end_of_day_base_heal_percent_of_max",
+            "End-of-day dragon base heal (% of max HP)",
+            0,
+            100,
+        ),
     )
 
 
@@ -357,7 +389,6 @@ def _game_options_slider_value_label(attr: str, value: int | float) -> str:
     if attr == "raid_eco_loss_divisor":
         return f"{value:g}"
     if attr in (
-        "nearby_radius_map_width_percent",
         "settlement_growth_eco_percent",
         "settlement_heal_percent_of_max_at_zero",
         "settlement_heal_percent_of_max_when_damaged",
@@ -718,6 +749,7 @@ class _PlaytestArmy:
     atk: int
     dfn: int
     victory_gold: int = 0
+    stat_modifiers: StatModifierBag = field(default_factory=StatModifierBag)
 
 
 def _try_import_army_sim() -> Any | None:
@@ -868,17 +900,15 @@ def _resolve_army_combat_round(
     if not budget.ok:
         return budget
 
-    from .dragon_abilities import (
-        apply_ice_talons_to_army,
-        enemy_defence_for_round,
-        on_combat_round_started,
-    )
+    from .dragon_abilities import apply_ice_talons_to_army, enemy_defence_for_round, on_combat_round_started
 
     on_combat_round_started(dragon)
     exchange = dragon.attack_army(
         army_hp=_army_hp(army),
-        army_atk=int(army.atk),
-        army_dfn=enemy_defence_for_round(dragon, _army_position(army), int(army.dfn)),
+        army_atk=entity_effective_atk(army),
+        army_dfn=enemy_defence_for_round(
+            dragon, _army_position(army), entity_effective_dfn(army)
+        ),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):
@@ -897,9 +927,7 @@ def _draw_army_markers_on_map(
 ) -> None:
     """Army pixel marker on each revealed hex (below the dragon marker); X if art missing."""
 
-    marker_side = int(
-        max(8, min(hex_size * 1.35, hex_size * 1.55) * 2 * ARMY_MAP_MARKER_SCALE)
-    )
+    marker_side = int(max(8, min(hex_size * 1.35, hex_size * 1.55) * 2 * ARMY_MAP_MARKER_SCALE))
     half = max(5, int(hex_size * 0.28))
     line_w = max(2, int(hex_size * 0.1))
     for army in armies:
@@ -915,9 +943,7 @@ def _draw_army_markers_on_map(
             mrect = marker.get_rect(center=(icx, icy))
             surface.blit(marker, mrect)
             continue
-        marker_rgb = (
-            _HEROES_ARMY_MARKER_RGB if kind is ArmyKind.HEROES else _ARMY_MARKER_RGB
-        )
+        marker_rgb = _HEROES_ARMY_MARKER_RGB if kind is ArmyKind.HEROES else _ARMY_MARKER_RGB
         pygame.draw.line(
             surface,
             marker_rgb,
@@ -1035,6 +1061,18 @@ def hit_test_gameplay_panel_splitter(
     return None
 
 
+def _combat_stat_atk_line(view: CombatantView) -> str:
+    if view.atk_debuffed:
+        return f"ATK: {view.effective_atk} (base {view.base_atk})"
+    return f"ATK: {view.base_atk}"
+
+
+def _combat_stat_dfn_line(view: CombatantView) -> str:
+    if view.dfn_debuffed:
+        return f"DFN: {view.effective_dfn} (base {view.base_dfn})"
+    return f"DFN: {view.base_dfn}"
+
+
 def _draw_raid_combat_overlay(
     surface: pygame.Surface,
     font: pygame.font.Font,
@@ -1082,10 +1120,11 @@ def _draw_raid_combat_overlay(
         f"ATK: {dragon.atk}",
         f"DFN: {dragon.dfn}",
     )
+    settle_view = entity_combatant_view(settlement)
     s_lines = (
         f"HP: {settlement.hp} / {settlement.max_hp}",
-        f"ATK: {settlement.atk}",
-        f"DFN: {settlement.dfn}",
+        _combat_stat_atk_line(settle_view),
+        _combat_stat_dfn_line(settle_view),
     )
     rd_prev = preview_settlement_round(dragon, settlement, game_map)
     yd = y0
@@ -1203,6 +1242,7 @@ def _draw_army_combat_overlay(
     _draw_text(surface, font_small, army_label, (col_army_x, text_y), _UI_TEXT_RGB)
     stat_y = text_y + 22
     army_max_hp = int(army.max_hp)
+    army_view = entity_combatant_view(army)
     d_lines = (
         f"HP: {dragon.hp} / {dragon.max_hp}",
         f"ATK: {dragon.atk}",
@@ -1210,8 +1250,8 @@ def _draw_army_combat_overlay(
     )
     a_lines = (
         f"HP: {_army_hp(army)} / {army_max_hp}",
-        f"ATK: {int(army.atk)}",
-        f"DFN: {int(army.dfn)}",
+        _combat_stat_atk_line(army_view),
+        _combat_stat_dfn_line(army_view),
     )
     army_prev = preview_army_round(dragon, army, game_map)
     yd = stat_y
@@ -2004,9 +2044,7 @@ def run_play_session(
                 clip_prev = surf.get_clip()
                 surf.set_clip(map_viewport)
                 pygame.draw.rect(surf, BACKGROUND_COLOR, map_viewport)
-                tile_color = _make_tile_color_fn(
-                    dragon, citadel_coord, game_map, fog_of_war
-                )
+                tile_color = _make_tile_color_fn(dragon, citadel_coord, game_map, fog_of_war)
                 render_map(
                     surf,
                     game_map,
@@ -2015,9 +2053,7 @@ def run_play_session(
                     tile_color=tile_color,
                     clear_background=False,
                 )
-                _draw_army_markers_on_map(
-                    surf, active_armies, hex_size, origin, fog=fog_of_war
-                )
+                _draw_army_markers_on_map(surf, active_armies, hex_size, origin, fog=fog_of_war)
                 if (
                     inspector_focus_coord is not None
                     and game_map.get(inspector_focus_coord) is not None
@@ -3163,16 +3199,12 @@ def run_play_session(
 
                                 if _army_hp(target_army) <= 0:
                                     on_combat_ended(dgn)
-                                    gold_granted = grant_army_victory_loot(
-                                        dgn, target_army
-                                    )
+                                    gold_granted = grant_army_victory_loot(dgn, target_army)
                                     active_armies[:] = _prune_defeated_armies(active_armies)
                                     dname = display_name_for_kind(dgn.kind)
                                     army_overlay_banner = f"{dname} destroyed the army."
                                     if gold_granted:
-                                        army_overlay_banner += (
-                                            f" Gained {gold_granted} gold."
-                                        )
+                                        army_overlay_banner += f" Gained {gold_granted} gold."
                                     army_overlay_auto_close_deadline_ms = (
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
                                     )
@@ -3230,7 +3262,6 @@ def run_play_session(
                                         dgn,
                                         target,
                                         list(settlements_by_coord.values()),
-                                        map_width=gmap.width,
                                         tuning=game_tuning,
                                     )
                                     spawned = _spawn_armies_from_events(

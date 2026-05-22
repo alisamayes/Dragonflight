@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Iterable, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from .army_pathfinding import advance_along_path, army_sort_key
 from .citadel import CitadelState
 from .dragon import DamageRoundExchange, Dragon, MoveAttempt
+from .entity_stats import StatModifierBag
 from .hex_coord import OffsetCoord
 from .map_state import GameMap
 
@@ -80,6 +82,7 @@ class Army:
     kind: ArmyKind = ArmyKind.VILLAGE
     victory_gold: int = 0
     source_coord: OffsetCoord | None = None
+    stat_modifiers: StatModifierBag = field(default_factory=StatModifierBag)
 
     @classmethod
     def spawn_from_settlement(
@@ -154,8 +157,10 @@ class ArmyPhaseResult:
 def merge_army_stacks(armies: list[Army]) -> list[Army]:
     """Collapse co-located armies into one stack per hex (spec num2, num9).
 
-    Combined HP/``max_hp``/ATK/DFN use sum. ``movement_speed`` uses max so
-    merged stacks retain the fastest march rate among contributors.
+    Combined HP/``max_hp``/ATK/DFN sum **base** fields only. Hour/day modifiers
+    are not merged — the combined stack starts with a fresh empty
+    :class:`~dragonflight.entity_stats.StatModifierBag`.
+    ``movement_speed`` uses max so merged stacks retain the fastest march rate.
     """
 
     by_position: dict[OffsetCoord, list[Army]] = {}
@@ -181,6 +186,7 @@ def merge_army_stacks(armies: list[Army]) -> list[Army]:
                     (a.source_coord for a in group if a.source_coord is not None),
                     None,
                 ),
+                stat_modifiers=StatModifierBag(),
             )
         )
     return merged
@@ -271,7 +277,8 @@ def eligible_heroes_party_cities(settlements: Iterable[object]) -> list[object]:
     cities = [
         s
         for s in settlements
-        if getattr(s, "settlement_type", None) == SettlementType.CITY and int(getattr(s, "hp", 0)) > 0
+        if getattr(s, "settlement_type", None) == SettlementType.CITY
+        and int(getattr(s, "hp", 0)) > 0
     ]
     return sorted(cities, key=lambda s: (s.position.row, s.position.col))
 
@@ -450,17 +457,18 @@ def resolve_army_combat_round(
     if not budget.ok:
         return budget
 
+    from .combatant_stats import army_effective_atk
     from .dragon_abilities import (
         apply_ice_talons_to_army,
-        enemy_defence_for_round,
+        army_defence_for_round,
         on_combat_round_started,
     )
 
     on_combat_round_started(dragon)
     exchange = dragon.attack_army(
         army_hp=army.hp,
-        army_atk=army.atk,
-        army_dfn=enemy_defence_for_round(dragon, army.position, army.dfn),
+        army_atk=army_effective_atk(army),
+        army_dfn=army_defence_for_round(dragon, army),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):

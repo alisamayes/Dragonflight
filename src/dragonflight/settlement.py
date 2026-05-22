@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
 from .dragon import DamageRoundExchange, Dragon, MoveAttempt
+from .entity_stats import StatModifierBag
 from .hex_coord import OffsetCoord, distance, offset_to_axial
 from .terrain import Terrain
 
@@ -30,14 +32,14 @@ SETTLEMENT_HEAL_PERCENT_OF_MAX_AT_ZERO: int = 80
 SETTLEMENT_HEAL_PERCENT_OF_MAX_WHEN_DAMAGED: int = 40
 SETTLEMENT_GROWTH_ECO_PERCENT: int = 15
 SETTLEMENT_GROWTH_STAT_BONUS: int = 5
+#: Maximum eco gained per undamaged settlement-phase tick (one in-game day).
+SETTLEMENT_GROWTH_ECO_CAP_PER_DAY: int = 200
 
 RAID_ECO_LOSS_DIVISOR: float = 2.0
 RAID_STAT_LOSS: int = 6
 #: Percent of the defeated settlement's current ``eco`` granted as dragon gold when a raid clears.
 RAID_VICTORY_GOLD_PERCENT_OF_ECO: int = 50
 RAID_DIRECT_AGGRESSION: int = 300
-RAID_NEARBY_AGGRESSION: int = 150
-DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT: int = 30
 
 
 class SettlementType(Enum):
@@ -90,26 +92,46 @@ class SettlementRaidResolution:
     gold_gained: int
 
 
-def nearby_aggression_radius(
-    map_width: int,
-    tuning: GameTuning | None = None,
-) -> int:
-    """Return the nearby-spill radius: rounded ``nearby_radius_map_width_percent`` of map width."""
-
-    t = _resolved_tuning(tuning)
-    return round(map_width * t.nearby_radius_map_width_percent / 100)
-
-
 def settlement_hex_distance(a: OffsetCoord, b: OffsetCoord) -> int:
     """Hex distance between two offset settlement coordinates."""
 
     return distance(offset_to_axial(a), offset_to_axial(b))
 
 
-def is_within_nearby_radius(origin: OffsetCoord, candidate: OffsetCoord, radius: int) -> bool:
-    """Return whether ``candidate`` receives aggression spillover from ``origin``."""
+def raid_spill_aggression_amount(
+    distance: int,
+    *,
+    dropoff: int,
+    base: int = RAID_DIRECT_AGGRESSION,
+) -> int:
+    """Spill aggression at ``distance`` hexes from a defeated settlement."""
 
-    return settlement_hex_distance(origin, candidate) <= radius
+    return max(0, base - distance * dropoff)
+
+
+def max_spill_distance(
+    dropoff: int,
+    *,
+    base: int = RAID_DIRECT_AGGRESSION,
+) -> int:
+    """Largest hex distance that still receives spill aggression (amount > 0)."""
+
+    if dropoff < 1:
+        raise ValueError(f"dropoff must be >= 1, got {dropoff}")
+    return (base - 1) // dropoff
+
+
+def compute_settlement_eco_growth(
+    eco: int,
+    starting_eco: int,
+    growth_eco_percent: int,
+    *,
+    cap_per_day: int = SETTLEMENT_GROWTH_ECO_CAP_PER_DAY,
+) -> int:
+    """Eco gained for one growth tick: formula, rounded up, capped per day."""
+
+    raw = (eco * growth_eco_percent / 100) + (starting_eco * 0.1)
+    return min(cap_per_day, max(0, math.ceil(raw)))
 
 
 @dataclass(slots=True)
@@ -130,6 +152,7 @@ class Settlement:
     aggression_threshold: int
     position: OffsetCoord
     settlement_type: SettlementType
+    stat_modifiers: StatModifierBag = field(default_factory=StatModifierBag)
 
     @classmethod
     def village(cls, position: OffsetCoord) -> Village:
@@ -182,10 +205,14 @@ class Settlement:
             return SettlementPhaseOutcome(action="healed", hp_delta=self.hp - hp_before)
 
         if self.hp == self.max_hp:
-            eco_growth = (self.eco * (t.settlement_growth_eco_percent / 100)) + (self.starting_eco * 0.1)
-            self.eco += eco_growth
-            self.atk += t.settlement_growth_stat_bonus
-            self.dfn += t.settlement_growth_stat_bonus
+            eco_growth = compute_settlement_eco_growth(
+                int(self.eco),
+                self.starting_eco,
+                t.settlement_growth_eco_percent,
+            )
+            self.eco = int(self.eco) + eco_growth
+            self.atk = int(self.atk) + t.settlement_growth_stat_bonus
+            self.dfn = int(self.dfn) + t.settlement_growth_stat_bonus
             return SettlementPhaseOutcome(
                 action="grew",
                 hp_delta=0,
@@ -236,55 +263,45 @@ class Settlement:
         self,
         settlements: Iterable[Settlement],
         *,
-        map_width: int,
-        radius: int | None = None,
         tuning: GameTuning | None = None,
     ) -> list[Army]:
-        """Apply nearby aggression spillover and return any spawned armies."""
+        """Apply distance-dropoff aggression spillover and return any spawned armies."""
 
-        spill_radius = (
-            radius if radius is not None else nearby_aggression_radius(map_width, tuning=tuning)
+        t = _resolved_tuning(tuning)
+        dropoff = t.raid_aggression_dropoff_per_tile
+        candidates = [s for s in settlements if s is not self]
+        candidates.sort(
+            key=lambda s: settlement_hex_distance(self.position, s.position),
         )
         events: list[Army] = []
-        for settlement in settlements:
-            if settlement is self:
-                continue
-            if is_within_nearby_radius(self.position, settlement.position, spill_radius):
-                event = settlement.add_aggression(
-                    RAID_NEARBY_AGGRESSION,
-                    tuning=tuning,
-                )
-                if event is not None:
-                    events.append(event)
+        for settlement in candidates:
+            dist = settlement_hex_distance(self.position, settlement.position)
+            amount = raid_spill_aggression_amount(dist, dropoff=dropoff)
+            if amount == 0:
+                break
+            event = settlement.add_aggression(amount, tuning=tuning)
+            if event is not None:
+                events.append(event)
         return events
 
     def on_raid_defeat(
         self,
         settlements: Iterable[Settlement],
         *,
-        map_width: int,
-        radius: int | None = None,
         tuning: GameTuning | None = None,
     ) -> list[Army]:
         """Apply the raid-defeat bundle after this settlement reaches 0 HP."""
 
         t = _resolved_tuning(tuning)
-        self.eco = int(self.eco / t.raid_eco_loss_divisor)
-        self.atk = max(0, self.atk - t.raid_stat_loss)
-        self.dfn = max(0, self.dfn - t.raid_stat_loss)
+        self.eco = max(0, int(int(self.eco) / t.raid_eco_loss_divisor))
+        self.atk = max(0, int(self.atk) - t.raid_stat_loss)
+        self.dfn = max(0, int(self.dfn) - t.raid_stat_loss)
 
         events: list[Army] = []
         direct_event = self.add_aggression(RAID_DIRECT_AGGRESSION, tuning=tuning)
         if direct_event is not None:
             events.append(direct_event)
-        events.extend(
-            self.spill_aggression_to_nearby(
-                settlements,
-                map_width=map_width,
-                radius=radius,
-                tuning=tuning,
-            )
-        )
+        events.extend(self.spill_aggression_to_nearby(settlements, tuning=tuning))
         return events
 
 
@@ -297,8 +314,8 @@ class Village(Settlement):
         super().__init__(
             hp=500,
             max_hp=500,
-            eco=500,
-            starting_eco=500,
+            eco=400,
+            starting_eco=400,
             atk=50,
             dfn=30,
             aggression=aggression,
@@ -317,8 +334,8 @@ class City(Settlement):
         super().__init__(
             hp=800,
             max_hp=800,
-            eco=1000,
-            starting_eco=1000,
+            eco=800,
+            starting_eco=800,
             atk=70,
             dfn=80,
             aggression=aggression,
@@ -337,8 +354,8 @@ class Fort(Settlement):
         super().__init__(
             hp=800,
             max_hp=800,
-            eco=100,
-            starting_eco=100,
+            eco=150,
+            starting_eco=150,
             atk=80,
             dfn=80,
             aggression=aggression,
@@ -365,7 +382,6 @@ def apply_settlement_raid_victory_bundle(
     settlement: Settlement,
     settlements: Iterable[Settlement],
     *,
-    map_width: int,
     tuning: GameTuning | None = None,
 ) -> tuple[int, list[Army]]:
     """After combat reduces settlement HP to 0: grant gold, then apply raid-defeat effects.
@@ -377,7 +393,7 @@ def apply_settlement_raid_victory_bundle(
     apply_raid_victory_loot(dragon, settlement)
     gold_added = dragon.gold - gold_before
     events = list(
-        settlement.on_raid_defeat(settlements, map_width=map_width, tuning=tuning),
+        settlement.on_raid_defeat(settlements, tuning=tuning),
     )
     return gold_added, events
 
@@ -406,21 +422,20 @@ def resolve_settlement_combat_round(
 ) -> DamageRoundExchange | MoveAttempt:
     """Run one 30-minute settlement combat round using the existing Dragon API."""
 
-    from .dragon_abilities import (
-        apply_ice_talons_to_settlement,
-        enemy_defence_for_round,
-        on_combat_round_started,
-    )
+    from .dragon_abilities import apply_ice_talons_to_settlement, on_combat_round_started
 
     budget = dragon.validate_damage_round_preserves_return_to_citadel(citadel_coord)
     if not budget.ok:
         return budget
 
+    from .combatant_stats import settlement_effective_atk
+    from .dragon_abilities import settlement_defence_for_round
+
     on_combat_round_started(dragon)
     exchange = dragon.attack_settlement(
         settlement_hp=settlement.hp,
-        settlement_defence_atk_proxy=settlement.atk,
-        settlement_dfn=enemy_defence_for_round(dragon, settlement.position, settlement.dfn),
+        settlement_defence_atk_proxy=settlement_effective_atk(settlement),
+        settlement_dfn=settlement_defence_for_round(dragon, settlement),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):
@@ -437,7 +452,6 @@ def run_settlement_combat_loop(
     *,
     citadel_coord: OffsetCoord,
     settlements: Iterable[Settlement] | None = None,
-    map_width: int | None = None,
     tuning: GameTuning | None = None,
     on_settlement_defeated: Callable[[Dragon, Settlement], None] | None = None,
 ) -> SettlementCombatLoopResult:
@@ -450,8 +464,8 @@ def run_settlement_combat_loop(
     Retreating (``should_continue`` false) ends combat without applying the
     raid-defeat bundle—only HP already lost in resolved rounds remains changed.
 
-    If ``settlements`` and ``map_width`` are supplied, settlement defeat triggers
-    the raid-defeat bundle immediately when settlement HP reaches 0.
+    If ``settlements`` is supplied, settlement defeat triggers the raid-defeat
+    bundle immediately when settlement HP reaches 0.
     """
 
     rounds = 0
@@ -483,13 +497,9 @@ def run_settlement_combat_loop(
             on_combat_ended(dragon)
             if on_settlement_defeated is not None:
                 on_settlement_defeated(dragon, settlement)
-            if settlements is not None and map_width is not None:
+            if settlements is not None:
                 spawn_events.extend(
-                    settlement.on_raid_defeat(
-                        settlements,
-                        map_width=map_width,
-                        tuning=tuning,
-                    ),
+                    settlement.on_raid_defeat(settlements, tuning=tuning),
                 )
             return SettlementCombatLoopResult(
                 rounds_resolved=rounds,
@@ -527,7 +537,6 @@ def resolve_settlement_raid(
     world: GameMap,
     settlements: Iterable[Settlement],
     *,
-    map_width: int,
     citadel_coord: OffsetCoord,
     tuning: GameTuning | None = None,
 ) -> SettlementRaidResolution:
@@ -544,7 +553,6 @@ def resolve_settlement_raid(
         lambda: True,
         citadel_coord=citadel_coord,
         settlements=settlements,
-        map_width=map_width,
         tuning=tuning,
         on_settlement_defeated=apply_raid_victory_loot,
     )
@@ -552,13 +560,11 @@ def resolve_settlement_raid(
 
 
 __all__ = [
-    "DEFAULT_NEARBY_RADIUS_MAP_WIDTH_PERCENT",
     "City",
     "Fort",
     "MockArmySpawnEvent",
     "RAID_DIRECT_AGGRESSION",
     "RAID_ECO_LOSS_DIVISOR",
-    "RAID_NEARBY_AGGRESSION",
     "RAID_STAT_LOSS",
     "RAID_VICTORY_GOLD_PERCENT_OF_ECO",
     "SETTLEMENT_GROWTH_ECO_PERCENT",
@@ -573,8 +579,8 @@ __all__ = [
     "Village",
     "apply_raid_victory_loot",
     "apply_settlement_raid_victory_bundle",
-    "is_within_nearby_radius",
-    "nearby_aggression_radius",
+    "max_spill_distance",
+    "raid_spill_aggression_amount",
     "raid_victory_gold_from_eco",
     "resolve_settlement_combat_round",
     "resolve_settlement_raid",

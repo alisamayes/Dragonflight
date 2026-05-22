@@ -111,12 +111,8 @@ class TestHeroesPartyCitySelection:
         pool = HeroesPartyCityPool()
         rng = random.Random(0)
 
-        wave1, pool = spawn_heroes_party_wave(
-            cities, 5, tuning=tuning, pool=pool, rng=rng
-        )
-        wave2, pool = spawn_heroes_party_wave(
-            cities, 10, tuning=tuning, pool=pool, rng=rng
-        )
+        wave1, pool = spawn_heroes_party_wave(cities, 5, tuning=tuning, pool=pool, rng=rng)
+        wave2, pool = spawn_heroes_party_wave(cities, 10, tuning=tuning, pool=pool, rng=rng)
 
         pos1 = {a.position for a in wave1}
         pos2 = {a.position for a in wave2}
@@ -135,13 +131,9 @@ class TestHeroesPartyCitySelection:
         pool = HeroesPartyCityPool()
         rng = random.Random(0)
 
-        wave1, pool = spawn_heroes_party_wave(
-            cities, 5, tuning=tuning, pool=pool, rng=rng
-        )
+        wave1, pool = spawn_heroes_party_wave(cities, 5, tuning=tuning, pool=pool, rng=rng)
         _, pool = spawn_heroes_party_wave(cities, 10, tuning=tuning, pool=pool, rng=rng)
-        wave3, pool = spawn_heroes_party_wave(
-            cities, 15, tuning=tuning, pool=pool, rng=rng
-        )
+        wave3, pool = spawn_heroes_party_wave(cities, 15, tuning=tuning, pool=pool, rng=rng)
 
         assert len(wave3) == 2
         assert len(pool.queue) == 2
@@ -165,9 +157,7 @@ class TestHeroesPartyCitySelection:
 
     def test_pool_drops_dead_city_coords(self) -> None:
         cities = _four_cities()
-        pool = HeroesPartyCityPool(
-            queue=[c.position for c in cities] + [OffsetCoord(9, 9)]
-        )
+        pool = HeroesPartyCityPool(queue=[c.position for c in cities] + [OffsetCoord(9, 9)])
         cities[0].hp = 0
         rng = random.Random(0)
         eligible = eligible_heroes_party_cities(cities)
@@ -186,9 +176,7 @@ class TestHeroesPartyCitySelection:
         tuning = default_game_tuning()
         apply_difficulty_preset(tuning, level)  # type: ignore[arg-type]
         cities = [City(OffsetCoord(i, 0)) for i in range(5)]
-        wave, _ = spawn_heroes_party_wave(
-            cities, 5, tuning=tuning, rng=random.Random(0)
-        )
+        wave, _ = spawn_heroes_party_wave(cities, 5, tuning=tuning, rng=random.Random(0))
         assert len(wave) == expected_count
 
     def test_no_wave_on_non_trigger_turn(self) -> None:

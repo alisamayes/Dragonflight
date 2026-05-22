@@ -23,6 +23,7 @@ from .dragon_defaults import (
     HOURS_PER_DAMAGE_ROUND,
     HOURS_PER_DRAGON_DAY,
 )
+from .entity_stats import StatModifierBag
 from .hex_coord import OffsetCoord, distance, offset_to_axial
 from .terrain import Terrain
 
@@ -106,6 +107,7 @@ class Dragon:
     active_ability_hours: dict[str, float] = field(default_factory=dict)
     passive_stacks: dict[str, int] = field(default_factory=dict)
     marked_ability_tiles: dict[str, tuple[OffsetCoord, ...]] = field(default_factory=dict)
+    stat_modifiers: StatModifierBag = field(default_factory=StatModifierBag)
 
     @property
     def current_hp(self) -> int:
@@ -114,7 +116,9 @@ class Dragon:
 
     @current_hp.setter
     def current_hp(self, value: int) -> None:
-        self.hp = max(0, min(int(value), self.max_hp))
+        from .dragon_abilities import effective_max_hp
+
+        self.hp = max(0, min(int(value), effective_max_hp(self)))
 
     @classmethod
     def new_red_fire_at(cls, citadel_coord: OffsetCoord) -> Dragon:
@@ -159,15 +163,19 @@ class Dragon:
             float(t.dragon_citadel_end_of_day_base_heal_percent_of_max)
             + float(DRAGON_CITADEL_END_OF_DAY_BONUS_HEAL_PERCENT_OF_MAX_PER_HOUR_REMAINING) * hrs
         )
-        return int(round(self.max_hp * total_percent / 100.0))
+        from .dragon_abilities import effective_max_hp
+
+        return int(round(effective_max_hp(self) * total_percent / 100.0))
 
     def _apply_citadel_end_of_day_healing(
         self,
         *,
         tuning: GameTuning | None = None,
     ) -> None:
+        from .dragon_abilities import effective_max_hp
+
         gained = self._citadel_end_of_day_heal_points(tuning=tuning)
-        self.hp = min(self.max_hp, self.hp + gained)
+        self.hp = min(effective_max_hp(self), self.hp + gained)
 
     def hex_distance_to(self, target: OffsetCoord) -> int:
         """Straight-line axial distance ignoring terrain — valid for dragon flight (spec num5)."""
@@ -370,9 +378,7 @@ class Dragon:
         )
 
         base_attack = effective_attack(self, world=world) + vivify_attack_bonus(self)
-        boosted_attack = max(
-            1, int(round(base_attack * outgoing_combat_damage_multiplier(self)))
-        )
+        boosted_attack = max(1, int(round(base_attack * outgoing_combat_damage_multiplier(self))))
         if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
             return MoveAttempt(ok=False, reason="not enough daily time for a damage round")
         dragon_to_target = damage_dragon_attacks(boosted_attack, army_dfn)
@@ -424,9 +430,7 @@ class Dragon:
         )
 
         base_attack = effective_attack(self, world=world) + vivify_attack_bonus(self)
-        boosted_attack = max(
-            1, int(round(base_attack * outgoing_combat_damage_multiplier(self)))
-        )
+        boosted_attack = max(1, int(round(base_attack * outgoing_combat_damage_multiplier(self))))
         if self.hours_remaining + 1e-9 < HOURS_PER_DAMAGE_ROUND:
             return MoveAttempt(ok=False, reason="not enough daily time for a damage round")
         dragon_to_target = damage_dragon_attacks(boosted_attack, settlement_dfn)

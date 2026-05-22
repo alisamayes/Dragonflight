@@ -8,18 +8,21 @@ from dragonflight.army import Army, resolve_army_combat_round
 from dragonflight.combat_preview import preview_army_round, preview_settlement_round
 from dragonflight.dragon import DamageRoundExchange
 from dragonflight.dragon_abilities import (
+    VIVIFY_MAX_HP_SOURCE,
     VIVIFY_SACRIFICE_EFFECT_NAME,
     ability_ui_detail_lines,
     active_effect_hours_remaining,
     apply_time_spent,
     cooldown_remaining,
     effective_attack,
+    effective_max_hp,
     on_combat_ended,
     synchronize_unlocked_abilities,
     try_use_ability,
     vivify_attack_bonus,
 )
 from dragonflight.dragon_playables import Greengon, Purplegon, Redgon
+from dragonflight.entity_stats import StatKey, flat_add_total_for_source
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
 from dragonflight.settlement import Fort, resolve_settlement_combat_round
@@ -147,21 +150,29 @@ def test_vivify_sacrifice_expires_before_temp_max_hp() -> None:
     )
 
     assert result.ok
-    assert dragon.max_hp == 720
+    assert dragon.max_hp == 600
+    assert effective_max_hp(dragon) == 720
     assert dragon.hp == 720
-    assert dragon.passive_stacks["Vivify max hp bonus"] == 120
+    assert (
+        flat_add_total_for_source(dragon.stat_modifiers, VIVIFY_MAX_HP_SOURCE, StatKey.MAX_HP)
+        == 120
+    )
     assert active_effect_hours_remaining(dragon, VIVIFY_SACRIFICE_EFFECT_NAME) == 5.0
 
     apply_time_spent(dragon, 6.0)
 
     assert active_effect_hours_remaining(dragon, VIVIFY_SACRIFICE_EFFECT_NAME) == 0.0
-    assert dragon.max_hp == 720
+    assert dragon.max_hp == 600
+    assert effective_max_hp(dragon) == 720
     assert vivify_attack_bonus(dragon) == 0
 
     dragon.begin_new_day_at_citadel(coord)
 
     assert dragon.max_hp == 600
-    assert "Vivify max hp bonus" not in dragon.passive_stacks
+    assert effective_max_hp(dragon) == 600
+    assert (
+        flat_add_total_for_source(dragon.stat_modifiers, VIVIFY_MAX_HP_SOURCE, StatKey.MAX_HP) == 0
+    )
 
 
 def test_vivify_ui_lines_use_base_max_and_sacrifice_timer() -> None:
@@ -184,6 +195,31 @@ def test_vivify_ui_lines_use_base_max_and_sacrifice_timer() -> None:
     assert "+120 max HP" in lines[0]
     assert "5.0h / 5h" in lines[1]
     assert "2× rule" in lines[2]
+
+
+def test_defend_the_citadel_boosts_defence_not_attack() -> None:
+    from dragonflight.dragon_playables import Blackgon
+
+    coord = OffsetCoord(0, 0)
+    dragon = Blackgon.new_at(coord)
+    dragon.level = 15
+    world = _world(
+        Tile(coord=coord, terrain=Terrain.CITADEL),
+        Tile(coord=OffsetCoord(1, 0), terrain=Terrain.GRASSLAND),
+    )
+    dragon.position = OffsetCoord(1, 0)
+    result = try_use_ability(
+        dragon,
+        "Defend the Citadel",
+        world=world,
+        citadel_coord=coord,
+        settlements_by_coord={},
+    )
+    assert result.ok
+    from dragonflight.dragon_abilities import effective_attack, effective_defence
+
+    assert effective_attack(dragon) == dragon.atk
+    assert effective_defence(dragon) > dragon.dfn
 
 
 def test_vivify_attack_bonus_is_twice_sacrifice_while_window_active() -> None:
@@ -249,7 +285,10 @@ def test_ice_talons_reduces_army_attack_after_round() -> None:
     army = Army(hp=400, max_hp=400, atk=100, dfn=20, movement_speed=8, position=coord)
     world = _world(Tile(coord=coord, terrain=Terrain.GRASSLAND))
     assert resolve_army_combat_round(dragon, army, world, citadel_coord=OffsetCoord(5, 0))
-    assert army.atk == 90
+    from dragonflight.combatant_stats import army_effective_atk
+
+    assert army.atk == 100
+    assert army_effective_atk(army) == 90
 
 
 def test_combat_preview_matches_first_army_round_damage() -> None:

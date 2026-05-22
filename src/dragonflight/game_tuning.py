@@ -18,7 +18,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
     "easy": {
         "army_movement_speed": 8,
         "heroes_party_cities_per_wave": 1,
-        "nearby_radius_map_width_percent": 15,
+        "raid_aggression_dropoff_per_tile": 20,
         "settlement_growth_eco_percent": 10,
         "raid_eco_loss_divisor": 1.5,
         "raid_stat_loss": 10,
@@ -27,9 +27,9 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
         "dragon_citadel_end_of_day_base_heal_percent_of_max": 70,
     },
     "normal": {
-        "army_movement_speed": 12,
+        "army_movement_speed": 10,
         "heroes_party_cities_per_wave": 2,
-        "nearby_radius_map_width_percent": 30,
+        "raid_aggression_dropoff_per_tile": 10,
         "settlement_growth_eco_percent": 5,
         "raid_eco_loss_divisor": 2.0,
         "raid_stat_loss": 6,
@@ -38,9 +38,9 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
         "dragon_citadel_end_of_day_base_heal_percent_of_max": 50,
     },
     "hard": {
-        "army_movement_speed": 16,
+        "army_movement_speed": 14,
         "heroes_party_cities_per_wave": 3,
-        "nearby_radius_map_width_percent": 50,
+        "raid_aggression_dropoff_per_tile": 5,
         "settlement_growth_eco_percent": 0,
         "raid_eco_loss_divisor": 3.0,
         "raid_stat_loss": 3,
@@ -57,7 +57,7 @@ class GameTuning:
 
     army_movement_speed: int
     heroes_party_cities_per_wave: int
-    nearby_radius_map_width_percent: int
+    raid_aggression_dropoff_per_tile: int
     settlement_heal_percent_of_max_at_zero: int
     settlement_heal_percent_of_max_when_damaged: int
     settlement_growth_eco_percent: int
@@ -82,7 +82,11 @@ class GameTuning:
                 "heroes_party_cities_per_wave must be >= 0, "
                 f"got {self.heroes_party_cities_per_wave}",
             )
-        _pct("nearby_radius_map_width_percent", self.nearby_radius_map_width_percent)
+        if not (1 <= self.raid_aggression_dropoff_per_tile <= 50):
+            raise ValueError(
+                "raid_aggression_dropoff_per_tile must be between 1 and 50 inclusive, "
+                f"got {self.raid_aggression_dropoff_per_tile}",
+            )
         _pct(
             "settlement_heal_percent_of_max_at_zero",
             self.settlement_heal_percent_of_max_at_zero,
@@ -130,7 +134,7 @@ def default_game_tuning() -> GameTuning:
     tuning = GameTuning(
         army_movement_speed=0,
         heroes_party_cities_per_wave=0,
-        nearby_radius_map_width_percent=0,
+        raid_aggression_dropoff_per_tile=0,
         settlement_heal_percent_of_max_at_zero=0,
         settlement_heal_percent_of_max_when_damaged=0,
         settlement_growth_eco_percent=0,
@@ -157,4 +161,3 @@ __all__ = [
     "difficulty_preset_values",
     "resolve_tuning",
 ]
-
