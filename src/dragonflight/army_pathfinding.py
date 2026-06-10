@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+from typing import TYPE_CHECKING
 
 from .hex_coord import (
     OffsetCoord,
@@ -13,6 +14,9 @@ from .hex_coord import (
 )
 from .map_state import GameMap
 from .terrain import Terrain
+
+if TYPE_CHECKING:
+    from .world_events import ArmyMovementContext
 
 #: Terrains armies may enter (spec num5).
 ARMY_PASSABLE_TERRAINS: frozenset[Terrain] = frozenset(
@@ -29,9 +33,15 @@ GRASSLAND_MOVE_COST: int = 1
 WOODLAND_MOVE_COST: int = 2
 
 
-def army_terrain_move_cost(terrain: Terrain) -> int | None:
+def army_terrain_move_cost(
+    terrain: Terrain,
+    *,
+    movement_ctx: ArmyMovementContext | None = None,
+) -> int | None:
     """Return movement cost to enter ``terrain``, or ``None`` if impassable."""
 
+    if movement_ctx is not None and movement_ctx.rivers_passable and terrain is Terrain.RIVER:
+        return GRASSLAND_MOVE_COST
     if terrain not in ARMY_PASSABLE_TERRAINS:
         return None
     if terrain is Terrain.WOODLAND:
@@ -48,6 +58,8 @@ def shortest_path(
     start: OffsetCoord,
     goal: OffsetCoord,
     game_map: GameMap,
+    *,
+    movement_ctx: ArmyMovementContext | None = None,
 ) -> tuple[OffsetCoord, ...]:
     """Return lowest-cost path from ``start`` to ``goal`` (inclusive), or ``()`` if unreachable."""
 
@@ -58,9 +70,9 @@ def shortest_path(
     goal_tile = game_map.get(goal)
     if start_tile is None or goal_tile is None:
         return ()
-    if army_terrain_move_cost(start_tile.terrain) is None:
+    if army_terrain_move_cost(start_tile.terrain, movement_ctx=movement_ctx) is None:
         return ()
-    if army_terrain_move_cost(goal_tile.terrain) is None:
+    if army_terrain_move_cost(goal_tile.terrain, movement_ctx=movement_ctx) is None:
         return ()
 
     def heuristic(coord: OffsetCoord) -> int:
@@ -86,7 +98,7 @@ def shortest_path(
             tile = game_map.get(neighbour)
             if tile is None:
                 continue
-            step_cost = army_terrain_move_cost(tile.terrain)
+            step_cost = army_terrain_move_cost(tile.terrain, movement_ctx=movement_ctx)
             if step_cost is None:
                 continue
             tentative = g_score[current] + step_cost
@@ -104,10 +116,12 @@ def path_cost_to_goal(
     start: OffsetCoord,
     goal: OffsetCoord,
     game_map: GameMap,
+    *,
+    movement_ctx: ArmyMovementContext | None = None,
 ) -> int | None:
     """Return total movement cost along the shortest path, or ``None`` if unreachable."""
 
-    path = shortest_path(start, goal, game_map)
+    path = shortest_path(start, goal, game_map, movement_ctx=movement_ctx)
     if not path:
         return None
     total = 0
@@ -115,7 +129,7 @@ def path_cost_to_goal(
         tile = game_map.get(coord)
         if tile is None:
             return None
-        step = army_terrain_move_cost(tile.terrain)
+        step = army_terrain_move_cost(tile.terrain, movement_ctx=movement_ctx)
         if step is None:
             return None
         total += step
@@ -127,26 +141,40 @@ def advance_along_path(
     goal: OffsetCoord,
     movement_budget: int,
     game_map: GameMap,
+    *,
+    movement_ctx: ArmyMovementContext | None = None,
 ) -> OffsetCoord:
     """Move from ``start`` toward ``goal`` spending at most ``movement_budget`` movement points."""
 
-    path = shortest_path(start, goal, game_map)
+    path = shortest_path(start, goal, game_map, movement_ctx=movement_ctx)
     if not path:
         return start
 
     budget = movement_budget
     position = start
+    last_non_river = start
     for next_coord in path[1:]:
         tile = game_map.get(next_coord)
         if tile is None:
             break
-        step_cost = army_terrain_move_cost(tile.terrain)
+        step_cost = army_terrain_move_cost(tile.terrain, movement_ctx=movement_ctx)
         if step_cost is None or step_cost > budget:
             break
         budget -= step_cost
         position = next_coord
+        if tile.terrain is not Terrain.RIVER:
+            last_non_river = position
         if position == goal:
             break
+
+    if (
+        movement_ctx is not None
+        and movement_ctx.forbid_stop_on_river
+        and position != goal
+    ):
+        end_tile = game_map.get(position)
+        if end_tile is not None and end_tile.terrain is Terrain.RIVER:
+            return last_non_river
     return position
 
 
@@ -154,10 +182,17 @@ def army_sort_key(
     army_position: OffsetCoord,
     citadel_coord: OffsetCoord,
     game_map: GameMap,
+    *,
+    movement_ctx: ArmyMovementContext | None = None,
 ) -> tuple[int, int, int]:
     """Sort armies closest-to-citadel first; tie-break by ``(col, row)`` for stability."""
 
-    cost = path_cost_to_goal(army_position, citadel_coord, game_map)
+    cost = path_cost_to_goal(
+        army_position,
+        citadel_coord,
+        game_map,
+        movement_ctx=movement_ctx,
+    )
     unreachable_penalty = 109 if cost is None else cost
     return (unreachable_penalty, army_position.col, army_position.row)
 

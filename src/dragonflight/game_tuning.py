@@ -20,6 +20,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
         "heroes_party_cities_per_wave": 1,
         "raid_aggression_dropoff_per_tile": 20,
         "settlement_growth_eco_percent": 10,
+        "settlement_growth_stat_bonus": 1,
         "raid_eco_loss_divisor": 1.5,
         "raid_stat_loss": 10,
         "settlement_heal_percent_of_max_at_zero": 50,
@@ -31,6 +32,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
         "heroes_party_cities_per_wave": 2,
         "raid_aggression_dropoff_per_tile": 10,
         "settlement_growth_eco_percent": 5,
+        "settlement_growth_stat_bonus": 3,
         "raid_eco_loss_divisor": 2.0,
         "raid_stat_loss": 6,
         "settlement_heal_percent_of_max_at_zero": 80,
@@ -42,6 +44,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
         "heroes_party_cities_per_wave": 3,
         "raid_aggression_dropoff_per_tile": 5,
         "settlement_growth_eco_percent": 0,
+        "settlement_growth_stat_bonus": 5,
         "raid_eco_loss_divisor": 3.0,
         "raid_stat_loss": 3,
         "settlement_heal_percent_of_max_at_zero": 100,
@@ -65,6 +68,7 @@ class GameTuning:
     raid_eco_loss_divisor: float
     raid_stat_loss: int
     dragon_citadel_end_of_day_base_heal_percent_of_max: int
+    world_event_chance_percent: int
 
     def validate(self) -> None:
         """Raise :exc:`ValueError` if any field is outside supported ranges."""
@@ -96,9 +100,9 @@ class GameTuning:
             self.settlement_heal_percent_of_max_when_damaged,
         )
         _pct("settlement_growth_eco_percent", self.settlement_growth_eco_percent)
-        if self.settlement_growth_stat_bonus < 0:
+        if not (0 <= self.settlement_growth_stat_bonus <= 10):
             raise ValueError(
-                "settlement_growth_stat_bonus must be >= 0, "
+                "settlement_growth_stat_bonus must be between 0 and 10 inclusive, "
                 f"got {self.settlement_growth_stat_bonus}",
             )
         if self.raid_eco_loss_divisor < 1.0:
@@ -111,6 +115,7 @@ class GameTuning:
             "dragon_citadel_end_of_day_base_heal_percent_of_max",
             self.dragon_citadel_end_of_day_base_heal_percent_of_max,
         )
+        _pct("world_event_chance_percent", self.world_event_chance_percent)
 
 
 def difficulty_preset_values(level: DifficultyLevel) -> dict[str, int | float]:
@@ -120,7 +125,7 @@ def difficulty_preset_values(level: DifficultyLevel) -> dict[str, int | float]:
 
 
 def apply_difficulty_preset(tuning: GameTuning, level: DifficultyLevel) -> None:
-    """Apply Easy / Normal / Hard scalars; leaves ``settlement_growth_stat_bonus`` unchanged."""
+    """Apply Easy / Normal / Hard scalars (including ``settlement_growth_stat_bonus``)."""
 
     for key, value in _DIFFICULTY_PRESETS[level].items():
         setattr(tuning, key, value)
@@ -142,6 +147,7 @@ def default_game_tuning() -> GameTuning:
         raid_eco_loss_divisor=1.0,
         raid_stat_loss=0,
         dragon_citadel_end_of_day_base_heal_percent_of_max=0,
+        world_event_chance_percent=50,
     )
     apply_difficulty_preset(tuning, "normal")
     return tuning

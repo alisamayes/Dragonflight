@@ -31,7 +31,7 @@ SETTLEMENT_HEAL_PERCENT_OF_MAX_AT_ZERO: int = 80
 #: When ``0 < hp < max_hp``, heal this percent of :attr:`Settlement.max_hp` per tick.
 SETTLEMENT_HEAL_PERCENT_OF_MAX_WHEN_DAMAGED: int = 40
 SETTLEMENT_GROWTH_ECO_PERCENT: int = 15
-SETTLEMENT_GROWTH_STAT_BONUS: int = 5
+SETTLEMENT_GROWTH_STAT_BONUS: int = 3
 #: Maximum eco gained per undamaged settlement-phase tick (one in-game day).
 SETTLEMENT_GROWTH_ECO_CAP_PER_DAY: int = 200
 
@@ -185,6 +185,11 @@ class Settlement:
     def on_settlement_phase_end(
         self,
         tuning: GameTuning | None = None,
+        *,
+        growth_delayed: bool = False,
+        double_growth: bool = False,
+        double_healing: bool = False,
+        eco_growth_mult: float = 1.0,
     ) -> SettlementPhaseOutcome:
         """Apply one end-of-settlement-phase tick.
 
@@ -195,11 +200,16 @@ class Settlement:
 
         t = _resolved_tuning(tuning)
 
+        if growth_delayed:
+            return SettlementPhaseOutcome(action="none")
+
         if self.hp < self.max_hp:
             if self.hp == 0:
                 healing = self.max_hp * t.settlement_heal_percent_of_max_at_zero // 100
             else:
                 healing = self.max_hp * t.settlement_heal_percent_of_max_when_damaged // 100
+            if double_healing:
+                healing *= 2
             hp_before = self.hp
             self.hp = min(self.max_hp, self.hp + healing)
             return SettlementPhaseOutcome(action="healed", hp_delta=self.hp - hp_before)
@@ -210,16 +220,22 @@ class Settlement:
                 self.starting_eco,
                 t.settlement_growth_eco_percent,
             )
+            if eco_growth_mult != 1.0:
+                eco_growth = max(0, int(math.ceil(eco_growth * eco_growth_mult)))
+            stat_bonus = t.settlement_growth_stat_bonus
+            if double_growth:
+                eco_growth *= 2
+                stat_bonus *= 2
             self.eco = int(self.eco) + eco_growth
-            self.atk = int(self.atk) + t.settlement_growth_stat_bonus
-            self.dfn = int(self.dfn) + t.settlement_growth_stat_bonus
+            self.atk = int(self.atk) + stat_bonus
+            self.dfn = int(self.dfn) + stat_bonus
             return SettlementPhaseOutcome(
                 action="grew",
                 hp_delta=0,
                 max_hp_delta=0,
                 eco_delta=eco_growth,
-                atk_delta=t.settlement_growth_stat_bonus,
-                dfn_delta=t.settlement_growth_stat_bonus,
+                atk_delta=stat_bonus,
+                dfn_delta=stat_bonus,
             )
 
         return SettlementPhaseOutcome(action="none")

@@ -43,6 +43,7 @@ class TestDifficultyPresets:
                 "heroes_party_cities_per_wave": 1,
                 "raid_aggression_dropoff_per_tile": 20,
                 "settlement_growth_eco_percent": 10,
+                "settlement_growth_stat_bonus": 1,
                 "raid_eco_loss_divisor": 1.5,
                 "raid_stat_loss": 10,
                 "settlement_heal_percent_of_max_at_zero": 50,
@@ -54,6 +55,7 @@ class TestDifficultyPresets:
                 "heroes_party_cities_per_wave": 2,
                 "raid_aggression_dropoff_per_tile": 10,
                 "settlement_growth_eco_percent": 5,
+                "settlement_growth_stat_bonus": 3,
                 "raid_eco_loss_divisor": 2.0,
                 "raid_stat_loss": 6,
                 "settlement_heal_percent_of_max_at_zero": 80,
@@ -65,6 +67,7 @@ class TestDifficultyPresets:
                 "heroes_party_cities_per_wave": 3,
                 "raid_aggression_dropoff_per_tile": 5,
                 "settlement_growth_eco_percent": 0,
+                "settlement_growth_stat_bonus": 5,
                 "raid_eco_loss_divisor": 3.0,
                 "raid_stat_loss": 3,
                 "settlement_heal_percent_of_max_at_zero": 100,
@@ -87,18 +90,21 @@ class TestDifficultyPresets:
             raid_eco_loss_divisor=1.0,
             raid_stat_loss=0,
             dragon_citadel_end_of_day_base_heal_percent_of_max=0,
+            world_event_chance_percent=50,
         )
         apply_difficulty_preset(normal, "normal")
         for name in _preset_field_names():
             assert getattr(t, name) == getattr(normal, name)
         assert t.settlement_growth_stat_bonus == SETTLEMENT_GROWTH_STAT_BONUS
 
-    def test_apply_preset_leaves_stat_bonus_unchanged(self) -> None:
+    def test_apply_preset_sets_stat_bonus_per_difficulty(self) -> None:
         t = default_game_tuning()
-        t.settlement_growth_stat_bonus = 42
+        apply_difficulty_preset(t, "easy")
+        assert t.settlement_growth_stat_bonus == 1
+        apply_difficulty_preset(t, "normal")
+        assert t.settlement_growth_stat_bonus == 3
         apply_difficulty_preset(t, "hard")
-        assert t.settlement_growth_stat_bonus == 42
-        assert t.army_movement_speed == 16
+        assert t.settlement_growth_stat_bonus == 5
 
 
 class TestDefaultAndValidation:
@@ -120,6 +126,11 @@ class TestDefaultAndValidation:
     def test_validate_rejects_invalid_raid_divisor(self) -> None:
         t = replace(_baseline_tuning(), raid_eco_loss_divisor=0.5)
         with pytest.raises(ValueError, match="raid_eco_loss_divisor"):
+            t.validate()
+
+    def test_validate_rejects_stat_bonus_above_ten(self) -> None:
+        t = replace(_baseline_tuning(), settlement_growth_stat_bonus=11)
+        with pytest.raises(ValueError, match="settlement_growth_stat_bonus"):
             t.validate()
 
     def test_resolve_tuning_round_trips(self) -> None:

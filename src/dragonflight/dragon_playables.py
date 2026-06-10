@@ -245,9 +245,9 @@ class Yellowgon(Dragon):
             hp=500,
             max_hp=500,
             atk=90,
-            dfn=90,
+            dfn=100,
             flight_range_hexes=5,
-            speed_hexes_per_hour=5.0,
+            speed_hexes_per_hour=6.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
 
@@ -359,7 +359,7 @@ class Browngon(Dragon):
             atk=100,
             dfn=110,
             flight_range_hexes=4,
-            speed_hexes_per_hour=2.0,
+            speed_hexes_per_hour=3.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
 

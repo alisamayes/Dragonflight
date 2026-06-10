@@ -10,7 +10,8 @@ from .hex_coord import OffsetCoord
 from .map_state import GameMap
 
 #: Uniform fill for hexes not yet revealed this session.
-FOG_UNREVEALED_RGB: tuple[int, int, int] = (90, 90, 95)
+#: Slightly lighter gray so fog feels softer and reveals stand out more.
+FOG_UNREVEALED_RGB: tuple[int, int, int] = (130, 130, 138)
 FOG_FILL_RGB: tuple[int, int, int] = FOG_UNREVEALED_RGB
 
 

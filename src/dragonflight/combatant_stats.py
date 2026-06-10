@@ -174,9 +174,12 @@ def army_effective_max_hp(army: Army) -> int:
 def entity_combatant_view(entity: object) -> CombatantView:
     """Base vs effective combat lines for armies, settlements, or playtest stubs."""
 
-    if isinstance(entity, Army):
+    from .army import Army as _Army
+    from .settlement import Settlement as _Settlement
+
+    if isinstance(entity, _Army):
         return army_combatant_view(entity)
-    if isinstance(entity, Settlement):
+    if isinstance(entity, _Settlement):
         return settlement_combatant_view(entity)
     base = StatLine(
         max_hp=int(getattr(entity, "max_hp", 1)),
@@ -196,9 +199,12 @@ def entity_combatant_view(entity: object) -> CombatantView:
 def entity_effective_atk(entity: object) -> int:
     """Combat ATK for any entity with a modifier bag (base ``atk`` field unchanged)."""
 
-    if isinstance(entity, Army):
+    from .army import Army as _Army
+    from .settlement import Settlement as _Settlement
+
+    if isinstance(entity, _Army):
         return army_effective_atk(entity)
-    if isinstance(entity, Settlement):
+    if isinstance(entity, _Settlement):
         return settlement_effective_atk(entity)
     bag = getattr(entity, "stat_modifiers", None)
     if isinstance(bag, StatModifierBag):
@@ -221,9 +227,12 @@ def entity_effective_atk(entity: object) -> int:
 def entity_effective_dfn(entity: object) -> int:
     """Combat DFN for any entity with a modifier bag."""
 
-    if isinstance(entity, Army):
+    from .army import Army as _Army
+    from .settlement import Settlement as _Settlement
+
+    if isinstance(entity, _Army):
         return army_effective_dfn(entity)
-    if isinstance(entity, Settlement):
+    if isinstance(entity, _Settlement):
         return settlement_effective_dfn(entity)
     bag = getattr(entity, "stat_modifiers", None)
     if isinstance(bag, StatModifierBag):

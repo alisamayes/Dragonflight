@@ -24,6 +24,17 @@ _ARMY_ART_FILENAMES: dict[ArmyKind, tuple[str, str]] = {
     ArmyKind.HEROES: ("heros_army_pixel", "heros_army"),
 }
 
+#: When a kind has no dedicated sprites yet, use fort footsoldier art.
+_FALLBACK_ART_KIND: ArmyKind = ArmyKind.FORT
+
+
+def _resolved_art_kind(kind: ArmyKind) -> ArmyKind:
+    """Return ``kind`` when art is registered, else the footsoldier fallback."""
+
+    if kind in _ARMY_ART_FILENAMES:
+        return kind
+    return _FALLBACK_ART_KIND
+
 _pixel_loaded: dict[ArmyKind, pygame.Surface | None] = {}
 _detailed_loaded: dict[ArmyKind, pygame.Surface | None] = {}
 _marker_scaled: dict[tuple[ArmyKind, int], pygame.Surface] = {}
@@ -34,12 +45,12 @@ def armies_assets_dir() -> Path:
 
 
 def pixel_sprite_path(kind: ArmyKind) -> Path:
-    name = _ARMY_ART_FILENAMES[kind][0]
+    name = _ARMY_ART_FILENAMES[_resolved_art_kind(kind)][0]
     return armies_assets_dir() / _PIXEL_DIR / f"{name}.png"
 
 
 def detailed_sprite_path(kind: ArmyKind) -> Path:
-    name = _ARMY_ART_FILENAMES[kind][1]
+    name = _ARMY_ART_FILENAMES[_resolved_art_kind(kind)][1]
     return armies_assets_dir() / _DETAILED_DIR / f"{name}.png"
 
 

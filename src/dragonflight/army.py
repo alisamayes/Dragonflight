@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from .game_tuning import GameTuning
 
 DEFAULT_ARMY_MOVEMENT_SPEED: int = 12
-ARMY_HP_PERCENT_OF_SETTLEMENT_MAX: int = 66
-ARMY_ATK_PERCENT_OF_SETTLEMENT_ATK: int = 90
-ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN: int = 50
+ARMY_HP_PERCENT_OF_SETTLEMENT_MAX: int = 50
+ARMY_ATK_PERCENT_OF_SETTLEMENT_ATK: int = 70
+ARMY_DFN_PERCENT_OF_SETTLEMENT_DFN: int = 40
 HEROES_PARTY_WAVE_INTERVAL_TURNS: int = 5
 HEROES_PARTY_STAT_BONUS_PER_TURN: int = 2
 STANDARD_ARMY_VICTORY_GOLD_PERCENT_OF_ECO: int = 10
@@ -35,6 +35,8 @@ class ArmyKind(Enum):
     FORT = "fort"
     CITY = "city"
     HEROES = "heroes"
+    RAIDER = "raider"
+    GOLDEN_CARAVAN = "golden_caravan"
 
 
 # Merge precedence when co-located stacks combine (highest wins).
@@ -82,6 +84,7 @@ class Army:
     kind: ArmyKind = ArmyKind.VILLAGE
     victory_gold: int = 0
     source_coord: OffsetCoord | None = None
+    march_goal: OffsetCoord | None = None
     stat_modifiers: StatModifierBag = field(default_factory=StatModifierBag)
 
     @classmethod
@@ -370,34 +373,65 @@ def run_army_phase(
     *,
     citadel_coord: OffsetCoord,
     citadel_hp: int,
+    dragon: Dragon | None = None,
+    movement_ctx: object | None = None,
 ) -> ArmyPhaseResult:
     """Resolve army movement, merge, and citadel attacks (spec num2 Phase 4)."""
+
+    from .world_events import army_effective_movement_speed
 
     citadel = CitadelState(position=citadel_coord, hp=citadel_hp)
     active = [army for army in armies if not army.is_defeated()]
     ordered = sorted(
         active,
-        key=lambda army: army_sort_key(army.position, citadel_coord, game_map),
+        key=lambda army: army_sort_key(
+            army.position,
+            army.march_goal or citadel_coord,
+            game_map,
+            movement_ctx=movement_ctx,
+        ),
     )
 
+    escaped: list[Army] = []
     for army in ordered:
+        goal = army.march_goal or citadel_coord
+        speed = army_effective_movement_speed(army)
         army.position = advance_along_path(
             army.position,
-            citadel_coord,
-            army.movement_speed,
+            goal,
+            speed,
             game_map,
+            movement_ctx=movement_ctx,
         )
+        if (
+            army.kind is ArmyKind.GOLDEN_CARAVAN
+            and army.march_goal is not None
+            and army.position == army.march_goal
+        ):
+            escaped.append(army)
 
     # Citadel strikes happen per army that reaches the citadel this phase, before
     # same-hex merge (spec: each attacking army deals 1 HP; armies despawn after).
-    attackers = [army for army in ordered if army.position == citadel_coord]
+    attackers = [
+        army
+        for army in ordered
+        if army.position == citadel_coord and army not in escaped
+    ]
     citadel_attacks = len(attackers)
     messages: list[str] = []
-    for _ in attackers:
+    for army in attackers:
         citadel.apply_army_attack()
+        if army.kind is ArmyKind.RAIDER and dragon is not None:
+            if dragon.gold > 0:
+                messages.append("Raider army looted your treasury!")
+            dragon.gold = 0
         messages.append("An army reached the citadel and dealt 1 damage.")
 
-    remaining = [army for army in ordered if army.position != citadel_coord]
+    remaining = [
+        army
+        for army in ordered
+        if army.position != citadel_coord and army not in escaped
+    ]
     before_merge = len(remaining)
     merged = merge_army_stacks(remaining)
     merged_stacks = before_merge - len(merged)
