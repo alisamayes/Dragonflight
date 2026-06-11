@@ -67,3 +67,52 @@ class GameMap:
     def __iter__(self) -> Iterator[Tile]:
         """Iterate tiles. Order matches ``dict`` insertion order from the loader."""
         return iter(self.tiles.values())
+
+
+def clone_game_map(source: GameMap) -> GameMap:
+    """Return an independent copy of ``source`` for one play session.
+
+    Load authored JSON via ``map_loader.load_map``, then clone before gameplay
+    so Terrascape and similar effects can mutate tiles without touching disk.
+    """
+
+    return GameMap(
+        width=source.width,
+        height=source.height,
+        hex_size=source.hex_size,
+        orientation=source.orientation,
+        tiles={
+            coord: Tile(
+                coord=tile.coord,
+                terrain=tile.terrain,
+                settlement_kind=tile.settlement_kind,
+            )
+            for coord, tile in source.tiles.items()
+        },
+    )
+
+
+def replace_tile_terrain(
+    game_map: GameMap,
+    coord: OffsetCoord,
+    terrain: Terrain,
+) -> Tile:
+    """Replace terrain at ``coord`` on a session-owned ``GameMap``.
+
+    ``GameMap``/``Tile`` stay frozen; the tiles mapping is updated in place.
+    Callers must use a :func:`clone_game_map` copy so authored map files are unchanged.
+    """
+
+    existing = game_map.tiles.get(coord)
+    if existing is None:
+        msg = f"no tile at {coord!r}"
+        raise KeyError(msg)
+    replacement = Tile(
+        coord=coord,
+        terrain=terrain,
+        settlement_kind=(
+            existing.settlement_kind if terrain is Terrain.SETTLEMENT else None
+        ),
+    )
+    game_map.tiles[coord] = replacement
+    return replacement

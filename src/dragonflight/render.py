@@ -47,7 +47,8 @@ from .terrain import Terrain
 TERRAIN_COLORS: dict[Terrain, tuple[int, int, int]] = {
     Terrain.GRASSLAND: (138, 191, 96),
     Terrain.WOODLAND: (49, 110, 50),
-    Terrain.MOUNTAIN: (130, 130, 130),
+    # Slightly darker mountains so they stand out from fog and grass.
+    Terrain.MOUNTAIN: (95, 95, 100),
     Terrain.RIVER: (58, 123, 213),
     Terrain.BRIDGE: (139, 69, 19),
     Terrain.SETTLEMENT: (255, 247, 5),

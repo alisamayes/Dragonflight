@@ -214,7 +214,7 @@ OR
 
 MVP simulation detail (aligned with code):
 - Damaged settlements recover a percentage of their max HP per settlement-phase tick; the percentages come from session game tuning (easy / normal / hard presets and custom sliders — see Section 23). Settlements at 0 HP use `settlement_heal_percent_of_max_at_zero`; settlements with 0 < HP < max_hp use `settlement_heal_percent_of_max_when_damaged`. For each shipped preset, the zero-HP percentage is greater than or equal to the damaged percentage (more max-HP recovery when rebuilding from zero).
-- Undamaged settlements (at full HP) gain eco and ATK/DFN each tick. Eco change is `(settlement_growth_eco_percent% of current eco) + (10% of starting eco)`, where `settlement_growth_eco_percent` is tunable (preset or slider). ATK and DFN each increase by `settlement_growth_stat_bonus` (constant from settlement rules; not overwritten by difficulty presets). Max HP is never raised by this growth tick.
+- Undamaged settlements (at full HP) gain eco and ATK/DFN each tick. Eco change is `(settlement_growth_eco_percent% of current eco) + (10% of starting eco)`, where `settlement_growth_eco_percent` is tunable (preset or slider). ATK and DFN each increase by `settlement_growth_stat_bonus` (tunable; Easy 1 / Normal 3 / Hard 5 by preset). Max HP is never raised by this growth tick.
 
 ---
 
@@ -691,7 +691,7 @@ The movement playtest client (`python -m dragonflight`) includes a Game Options 
 
 Three presets bulk-apply a set of scalars: Easy, Normal, Hard. Normal is also what `default_game_tuning()` returns when no custom tuning is supplied.
 
-Applying a preset uses `apply_difficulty_preset()`, which does not change `settlement_growth_stat_bonus` (that field stays at the settlement-module default unless changed manually in Game Options).
+Applying a preset uses `apply_difficulty_preset()`, which sets `settlement_growth_stat_bonus` to 1 (Easy), 3 (Normal), or 5 (Hard) along with the other preset scalars.
 
 | Field (attribute on `GameTuning`) | Easy | Normal | Hard |
 | --- | ---: | ---: | ---: |

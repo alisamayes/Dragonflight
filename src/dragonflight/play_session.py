@@ -52,7 +52,18 @@ from .combatant_stats import (
     entity_effective_atk,
     entity_effective_dfn,
 )
-from .entity_stats import StatModifierBag
+from .debug_day_log import (
+    DayDebugLog,
+    SettlementPhaseBefore,
+    log_army_phase,
+    log_citadel_hp_change,
+    log_dragon_end_of_day_heal,
+    log_heroes_party_spawn,
+    log_settlement_phase,
+    log_world_event_effects,
+    log_world_event_roll,
+    snapshot_armies_before_phase,
+)
 from .dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from .dragon_abilities import on_combat_ended, try_use_ability
 from .dragon_art import load_detailed_sprite, map_marker_surface, scaled_to_fit
@@ -72,6 +83,7 @@ from .dragon_progression import (
     total_dragon_upgrade_draft_cost,
 )
 from .dragon_ui_theme import DragonUITheme, dragon_ui_theme_for_kind
+from .entity_stats import StatModifierBag
 from .fog_of_war import (
     FOG_UNREVEALED_RGB,
     FogOfWarState,
@@ -96,7 +108,7 @@ from .map_camera import (
     resolve_map_view,
 )
 from .map_loader import MapLoadError, load_map
-from .map_state import GameMap, Tile
+from .map_state import GameMap, Tile, clone_game_map
 from .play_session_panels import (
     DragonUpgradeOverlayClickRects,
     draw_dragon_panel,
@@ -119,6 +131,7 @@ from .play_session_ui import (
     _UI_MUTED_TEXT_RGB,
     _UI_PANEL_RGB,
     _UI_TEXT_RGB,
+    DebugOverlayClick,
 )
 from .play_session_ui import (
     clamp_panel_scroll as _clamp_panel_scroll,
@@ -161,6 +174,16 @@ from .settlement import (
 )
 from .terrain import Terrain
 from .tile_inspection import army_display_name_for_kind
+from .world_events import (
+    WorldEventDayState,
+    apply_army_day_speed_modifiers,
+    apply_world_event,
+    army_movement_context,
+    on_golden_caravan_defeated,
+    roll_world_event,
+    settlement_growth_is_delayed,
+    settlement_phase_world_event_hooks,
+)
 from .world_settlements import settlements_by_coord_from_map
 
 # --- Layout -------------------------------------------------------------------
@@ -361,8 +384,8 @@ def _game_options_slider_defs() -> tuple[tuple[str, str, int | float, int | floa
             0,
             100,
         ),
-        ("settlement_growth_stat_bonus", "Settlement ATK / DFN growth", 0, 50),
-        ("raid_eco_loss_divisor", "Settlement eco loss on defeat", 1.0, 10.0),
+        ("settlement_growth_stat_bonus", "Settlement ATK / DFN growth", 0, 10),
+        ("raid_eco_loss_divisor", "Settlement eco loss on defeat (current eco / X)", 1.0, 10.0),
         ("raid_stat_loss", "Settlement stat loss on defeat (current eco / X)", 0, 50),
         (
             "settlement_heal_percent_of_max_at_zero",
@@ -382,6 +405,12 @@ def _game_options_slider_defs() -> tuple[tuple[str, str, int | float, int | floa
             0,
             100,
         ),
+        (
+            "world_event_chance_percent",
+            "World event chance at start of each day (%)",
+            0,
+            100,
+        ),
     )
 
 
@@ -393,6 +422,7 @@ def _game_options_slider_value_label(attr: str, value: int | float) -> str:
         "settlement_heal_percent_of_max_at_zero",
         "settlement_heal_percent_of_max_when_damaged",
         "dragon_citadel_end_of_day_base_heal_percent_of_max",
+        "world_event_chance_percent",
     ):
         return f"{value}%"
     return str(value)
@@ -604,15 +634,26 @@ def _mute_rgb(rgb: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
     )
 
 
+_DARK_ECLIPSE_RGB: tuple[int, int, int] = (8, 8, 12)
+
+
 def _make_tile_color_fn(
     dragon: Dragon,
     citadel: OffsetCoord,
     game_map: GameMap,
     fog: FogOfWarState,
+    *,
+    dark_eclipse: bool = False,
 ):
     """Return per-tile fill: fog gray, else terrain with reachability muting."""
 
+    from .dragon_abilities import effective_flight_range
+
+    flight = effective_flight_range(dragon)
+
     def tile_color(tile: Tile) -> tuple[int, int, int]:
+        if dark_eclipse and dragon.hex_distance_to(tile.coord) > flight:
+            return _DARK_ECLIPSE_RGB
         if not is_revealed(fog, tile.coord):
             return FOG_UNREVEALED_RGB
         base = default_tile_fill_rgb(tile)
@@ -842,24 +883,28 @@ def _run_end_of_day_army_phase(
     *,
     citadel_coord: OffsetCoord,
     citadel_hp: int,
-) -> tuple[list[Any], int, list[str], bool]:
+    dragon: Dragon | None = None,
+    movement_ctx: object | None = None,
+) -> tuple[list[Any], int, list[str], bool, Any | None]:
     """Delegate army movement/attacks to simulation; no-op when module is absent."""
 
     sim = _try_import_army_sim()
     if sim is None or not hasattr(sim, "run_army_phase"):
-        return armies, citadel_hp, [], False
+        return armies, citadel_hp, [], False, None
 
     result = sim.run_army_phase(
         game_map,
         list(armies),
         citadel_coord=citadel_coord,
         citadel_hp=citadel_hp,
+        dragon=dragon,
+        movement_ctx=movement_ctx,
     )
     next_armies = list(getattr(result, "armies", armies))
     next_hp = int(getattr(result, "citadel_hp", citadel_hp))
     messages = list(getattr(result, "messages", ()) or ())
     game_over = bool(getattr(result, "game_over", next_hp <= 0))
-    return next_armies, next_hp, messages, game_over
+    return next_armies, next_hp, messages, game_over, result
 
 
 def _validate_dragon_vs_army(
@@ -900,15 +945,17 @@ def _resolve_army_combat_round(
     if not budget.ok:
         return budget
 
-    from .dragon_abilities import apply_ice_talons_to_army, enemy_defence_for_round, on_combat_round_started
+    from .dragon_abilities import (
+        apply_ice_talons_to_army,
+        enemy_defence_for_round,
+        on_combat_round_started,
+    )
 
     on_combat_round_started(dragon)
     exchange = dragon.attack_army(
         army_hp=_army_hp(army),
         army_atk=entity_effective_atk(army),
-        army_dfn=enemy_defence_for_round(
-            dragon, _army_position(army), entity_effective_dfn(army)
-        ),
+        army_dfn=enemy_defence_for_round(dragon, _army_position(army), entity_effective_dfn(army)),
         world=world,
     )
     if isinstance(exchange, DamageRoundExchange):
@@ -974,17 +1021,23 @@ def _map_viewport_rect(
     return pygame.Rect(dragon_panel_w, TIME_BAR_HEIGHT, inner_w, map_h)
 
 
-def _map_zoom_control_rects(map_viewport: pygame.Rect) -> tuple[pygame.Rect, pygame.Rect]:
-    """Return ``(zoom_in +, zoom_out −)`` at the top-right of the map viewport."""
+def _map_zoom_control_rects(
+    map_viewport: pygame.Rect,
+) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect, pygame.Rect]:
+    """Return ``(zoom_in +, zoom_out −, history, debug)`` at the top-right of the map viewport."""
 
     w = _MAP_ZOOM_BTN_SIZE
     h = _MAP_ZOOM_BTN_SIZE
     x = map_viewport.right - _MAP_ZOOM_BTN_MARGIN - w
     y_in = map_viewport.y + _MAP_ZOOM_BTN_MARGIN
     y_out = y_in + h + _MAP_ZOOM_BTN_GAP
+    y_hist = y_out + h + _MAP_ZOOM_BTN_GAP
+    y_debug = y_hist + h + _MAP_ZOOM_BTN_GAP
     return (
         pygame.Rect(x, y_in, w, h),
         pygame.Rect(x, y_out, w, h),
+        pygame.Rect(x, y_hist, w, h),
+        pygame.Rect(x, y_debug, w, h),
     )
 
 
@@ -994,21 +1047,28 @@ def _draw_map_zoom_controls(
     map_viewport: pygame.Rect,
     *,
     theme: DragonUITheme,
-) -> tuple[pygame.Rect, pygame.Rect]:
-    """Paint + / − zoom buttons; return rects for hit testing."""
+    debug_active: bool = False,
+) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect, pygame.Rect]:
+    """Paint + / − / History / Debug buttons; return rects for hit testing."""
 
     mx, my = pygame.mouse.get_pos()
-    zoom_in_rect, zoom_out_rect = _map_zoom_control_rects(map_viewport)
-    for rect, label in ((zoom_in_rect, "+"), (zoom_out_rect, "\u2212")):
+    zoom_in_rect, zoom_out_rect, history_rect, debug_rect = _map_zoom_control_rects(map_viewport)
+    for rect, label, active in (
+        (zoom_in_rect, "+", False),
+        (zoom_out_rect, "\u2212", False),
+        (history_rect, "\u23f0", False),
+        (debug_rect, "D", debug_active),
+    ):
         _draw_button(
             surface,
             font,
             rect,
             label,
             hovered=rect.collidepoint(mx, my),
+            active=active,
             border_rgb=theme.border_rgb,
         )
-    return zoom_in_rect, zoom_out_rect
+    return zoom_in_rect, zoom_out_rect, history_rect, debug_rect
 
 
 def clamp_gameplay_side_panel_widths(
@@ -1071,6 +1131,292 @@ def _combat_stat_dfn_line(view: CombatantView) -> str:
     if view.dfn_debuffed:
         return f"DFN: {view.effective_dfn} (base {view.base_dfn})"
     return f"DFN: {view.base_dfn}"
+
+
+def _draw_event_popup(
+    surface: pygame.Surface,
+    font: pygame.font.Font,
+    lines: list[str],
+    map_viewport: pygame.Rect,
+    *,
+    theme: DragonUITheme,
+) -> None:
+    """Top-right popup showing recent event messages, positioned below zoom controls."""
+
+    if not lines:
+        return
+
+    pad_x, pad_y = 16, 12
+    line_h = font.get_height() + 4
+    max_w = int(map_viewport.w * 0.45)
+    text_w = max_w - 2 * pad_x
+
+    wrapped: list[str] = []
+    for line in lines:
+        wrapped.extend(_wrap_text_to_width(font, line, text_w))
+        wrapped.append("")  # blank separator between entries
+    if wrapped and wrapped[-1] == "":
+        wrapped.pop()
+
+    content_h = len(wrapped) * line_h
+    popup_h = content_h + 2 * pad_y
+    popup_w = max_w
+
+    btn_size = _MAP_ZOOM_BTN_SIZE
+    btn_margin = _MAP_ZOOM_BTN_MARGIN
+    btn_gap = _MAP_ZOOM_BTN_GAP
+    below_zoom = map_viewport.y + btn_margin + 3 * btn_size + 2 * btn_gap + 8
+
+    popup_x = map_viewport.right - btn_margin - popup_w
+    popup_y = below_zoom
+
+    popup_rect = pygame.Rect(popup_x, popup_y, popup_w, popup_h)
+
+    bg = pygame.Surface((popup_w, popup_h), pygame.SRCALPHA)
+    bg.fill((24, 26, 34, 220))
+    surface.blit(bg, (popup_x, popup_y))
+    pygame.draw.rect(surface, theme.border_rgb, popup_rect, width=1, border_radius=6)
+
+    y = popup_y + pad_y
+    for text in wrapped:
+        if text:
+            txt_surf = font.render(text, True, _UI_TEXT_RGB)
+            surface.blit(txt_surf, (popup_x + pad_x, y))
+        y += line_h
+
+
+def _draw_event_history_overlay(
+    surface: pygame.Surface,
+    client_w: int,
+    client_h: int,
+    font_mid: pygame.font.Font,
+    font_small: pygame.font.Font,
+    event_log: list[tuple[int, str]],
+    scroll_y: int,
+    *,
+    theme: DragonUITheme,
+) -> tuple[pygame.Rect, int]:
+    """Full-screen modal showing all past events grouped by day. Returns (close_btn_rect, content_height)."""
+
+    dim = pygame.Surface((client_w, client_h), pygame.SRCALPHA)
+    dim.fill((12, 14, 20, 200))
+    surface.blit(dim, (0, 0))
+
+    panel_w = min(640, max(360, client_w - 120))
+    panel_h = min(client_h - 100, max(300, client_h * 3 // 4))
+    panel = pygame.Rect(
+        (client_w - panel_w) // 2,
+        (client_h - panel_h) // 2,
+        panel_w,
+        panel_h,
+    )
+    pygame.draw.rect(surface, (38, 41, 52), panel, border_radius=10)
+    pygame.draw.rect(surface, theme.border_rgb, panel, width=1, border_radius=10)
+
+    title_surf = font_mid.render("Event History", True, _UI_TEXT_RGB)
+    surface.blit(title_surf, (panel.centerx - title_surf.get_width() // 2, panel.y + 16))
+
+    btn_w, btn_h = 100, 34
+    close_btn = pygame.Rect(
+        panel.centerx - btn_w // 2,
+        panel.bottom - btn_h - 14,
+        btn_w,
+        btn_h,
+    )
+    mx, my = pygame.mouse.get_pos()
+    _draw_button(
+        surface,
+        font_mid,
+        close_btn,
+        "Close",
+        hovered=close_btn.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
+
+    content_top = panel.y + 52
+    content_bottom = close_btn.y - 10
+    content_area_h = max(1, content_bottom - content_top)
+
+    clip_prev = surface.get_clip()
+    surface.set_clip(pygame.Rect(panel.x, content_top, panel_w, content_area_h))
+
+    line_h = font_small.get_height() + 4
+    day_header_h = font_mid.get_height() + 8
+    text_w = panel_w - 40
+
+    by_day: dict[int, list[str]] = {}
+    for day, msg in event_log:
+        by_day.setdefault(day, []).append(msg)
+
+    total_content_h = 0
+    draw_items: list[tuple[str, bool, int]] = []  # (text, is_header, y_offset)
+    y_accum = 0
+    for day in sorted(by_day.keys(), reverse=True):
+        draw_items.append((f"Day {day}", True, y_accum))
+        y_accum += day_header_h
+        for msg in reversed(by_day[day]):
+            for wline in _wrap_text_to_width(font_small, msg, text_w):
+                draw_items.append((wline, False, y_accum))
+                y_accum += line_h
+        y_accum += 6  # gap between day groups
+    total_content_h = y_accum
+
+    for text, is_header, y_off in draw_items:
+        screen_y = content_top + y_off - scroll_y
+        if screen_y + line_h < content_top or screen_y > content_bottom:
+            continue
+        if is_header:
+            hdr_surf = font_mid.render(text, True, theme.accent_rgb)
+            surface.blit(hdr_surf, (panel.x + 20, screen_y))
+        else:
+            txt_surf = font_small.render(text, True, _UI_TEXT_RGB)
+            surface.blit(txt_surf, (panel.x + 28, screen_y))
+
+    surface.set_clip(clip_prev)
+
+    return close_btn, total_content_h
+
+
+def _clamp_debug_selected_day(day: int, debug_log: DayDebugLog) -> int:
+    days = debug_log.days()
+    if not days:
+        return max(1, day)
+    if day in days:
+        return day
+    if day < days[0]:
+        return days[0]
+    if day > days[-1]:
+        return days[-1]
+    prev = days[0]
+    for logged_day in days:
+        if logged_day > day:
+            return prev
+        prev = logged_day
+    return days[-1]
+
+
+def _draw_debug_overlay(
+    surface: pygame.Surface,
+    client_w: int,
+    client_h: int,
+    font_mid: pygame.font.Font,
+    font_small: pygame.font.Font,
+    debug_log: DayDebugLog,
+    selected_day: int,
+    scroll_y: int,
+    *,
+    theme: DragonUITheme,
+) -> DebugOverlayClick:
+    """Full-screen modal showing per-day simulation debug lines."""
+
+    dim = pygame.Surface((client_w, client_h), pygame.SRCALPHA)
+    dim.fill((12, 14, 20, 200))
+    surface.blit(dim, (0, 0))
+
+    panel_w = min(640, max(360, client_w - 120))
+    panel_h = min(client_h - 100, max(300, client_h * 3 // 4))
+    panel = pygame.Rect(
+        (client_w - panel_w) // 2,
+        (client_h - panel_h) // 2,
+        panel_w,
+        panel_h,
+    )
+    pygame.draw.rect(surface, (38, 41, 52), panel, border_radius=10)
+    pygame.draw.rect(surface, theme.border_rgb, panel, width=1, border_radius=10)
+
+    mx, my = pygame.mouse.get_pos()
+    day_btn_w, day_btn_h = 34, 30
+    title_text = f"Debug — Day {selected_day}"
+    title_surf = font_mid.render(title_text, True, _UI_TEXT_RGB)
+    title_x = panel.centerx - title_surf.get_width() // 2
+    title_y = panel.y + 16
+    day_minus = pygame.Rect(
+        title_x - day_btn_w - 10,
+        title_y + (title_surf.get_height() - day_btn_h) // 2,
+        day_btn_w,
+        day_btn_h,
+    )
+    day_plus = pygame.Rect(
+        title_x + title_surf.get_width() + 10,
+        title_y + (title_surf.get_height() - day_btn_h) // 2,
+        day_btn_w,
+        day_btn_h,
+    )
+    _draw_button(
+        surface,
+        font_mid,
+        day_minus,
+        "\u2212",
+        hovered=day_minus.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
+    surface.blit(title_surf, (title_x, title_y))
+    _draw_button(
+        surface,
+        font_mid,
+        day_plus,
+        "+",
+        hovered=day_plus.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
+
+    btn_w, btn_h = 100, 34
+    close_btn = pygame.Rect(
+        panel.centerx - btn_w // 2,
+        panel.bottom - btn_h - 14,
+        btn_w,
+        btn_h,
+    )
+    _draw_button(
+        surface,
+        font_mid,
+        close_btn,
+        "Close",
+        hovered=close_btn.collidepoint(mx, my),
+        border_rgb=theme.border_rgb,
+    )
+
+    content_top = panel.y + 52
+    content_bottom = close_btn.y - 10
+    content_area_h = max(1, content_bottom - content_top)
+
+    clip_prev = surface.get_clip()
+    surface.set_clip(pygame.Rect(panel.x, content_top, panel_w, content_area_h))
+
+    line_h = font_small.get_height() + 4
+    text_w = panel_w - 40
+    raw_lines = debug_log.format_for_display(selected_day)
+    has_real_lines = bool(raw_lines)
+    display_lines = raw_lines if has_real_lines else ["(No debug lines for this day.)"]
+
+    draw_items: list[tuple[str, int]] = []
+    y_accum = 0
+    for raw in display_lines:
+        wrapped = _wrap_text_to_width(font_small, raw, text_w)
+        if not wrapped:
+            wrapped = [""]
+        for wline in wrapped:
+            draw_items.append((wline, y_accum))
+            y_accum += line_h
+    total_content_h = y_accum
+
+    for text, y_off in draw_items:
+        screen_y = content_top + y_off - scroll_y
+        if screen_y + line_h < content_top or screen_y > content_bottom:
+            continue
+        line_rgb = _UI_TEXT_RGB if has_real_lines else _UI_MUTED_TEXT_RGB
+        txt_surf = font_small.render(text, True, line_rgb)
+        surface.blit(txt_surf, (panel.x + 20, screen_y))
+
+    surface.set_clip(clip_prev)
+
+    return DebugOverlayClick(
+        close=close_btn,
+        day_minus=day_minus,
+        day_plus=day_plus,
+        content_height=total_content_h,
+        content_viewport_h=content_area_h,
+    )
 
 
 def _draw_raid_combat_overlay(
@@ -1423,6 +1769,7 @@ def run_play_session(
     skip_menus = game_map is not None
     if skip_menus:
         assert game_map is not None
+        game_map = clone_game_map(game_map)
         citadel_coord = _find_citadel_coord(game_map)
         dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
 
@@ -1525,6 +1872,8 @@ def run_play_session(
         day_index = 1
         heroes_party_city_pool = HeroesPartyCityPool()
         heroes_party_rng = random.Random()
+        world_event_rng = random.Random()
+        world_event_day_state = WorldEventDayState()
         # Screens: main_menu, new_game_maps, new_game_dragon, game, settings,
         # game_options, map_creator_setup, map_creator_editor, map_editor
         screen: str = "game" if skip_menus else "main_menu"
@@ -1550,8 +1899,19 @@ def run_play_session(
         # Live Village/City/Fort instances — settlement phase, future raids/combat.
         settlements_by_coord: dict[OffsetCoord, Settlement] = {}
         inspector_focus_coord: OffsetCoord | None = None
-        inspector_message: str = ""
         inspector_raid_button_rect: pygame.Rect | None = None
+        event_log: list[tuple[int, str]] = []
+        pending_event_lines: list[str] = []
+        event_popup_active: bool = False
+        event_history_open: bool = False
+        event_history_scroll: int = 0
+        event_history_close_rect: pygame.Rect | None = None
+        event_history_content_h: int = 0
+        day_debug_log = DayDebugLog()
+        debug_overlay_active: bool = False
+        debug_selected_day: int = 1
+        debug_scroll_y: int = 0
+        debug_overlay_click: DebugOverlayClick | None = None
         inspector_army_attack_button_rect: pygame.Rect | None = None
         dragon_ability_button_rects: dict[str, pygame.Rect] = {}
         dragon_panel_scroll: int = 0
@@ -1567,6 +1927,7 @@ def run_play_session(
         raid_overlay_retreat_rect: pygame.Rect | None = None
         active_armies: list[Any] = []
         citadel_hp: int = CITADEL_STARTING_HP
+        citadel_damage_announced: bool = False
         game_over: bool = False
         army_combat_target: Any | None = None
         army_overlay_banner: str = ""
@@ -1666,7 +2027,7 @@ def run_play_session(
 
             try:
                 selected_resolved = path.resolve()
-                new_map = load_map(selected_resolved)
+                new_map = clone_game_map(load_map(selected_resolved))
             except MapLoadError as exc:
                 return False, f"Failed to load map: {exc}"
             except OSError as exc:
@@ -1679,7 +2040,7 @@ def run_play_session(
         def _reset_session_for_map(new_map: GameMap) -> None:
             nonlocal game_map, citadel_coord, dragon, day_index, screen, settings_status
             nonlocal fog_of_war
-            nonlocal inspector_focus_coord, inspector_message
+            nonlocal inspector_focus_coord
             nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
             nonlocal raid_overlay_auto_close_deadline_ms
@@ -1690,16 +2051,29 @@ def run_play_session(
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
             nonlocal dragon_panel_scroll, inspector_panel_scroll, map_camera
             nonlocal heroes_party_city_pool, heroes_party_rng
+            nonlocal world_event_rng, world_event_day_state
+            nonlocal event_popup_active, event_history_open, event_history_scroll
+            nonlocal day_debug_log, debug_overlay_active, debug_selected_day, debug_scroll_y
             game_map = new_map
             citadel_coord = _find_citadel_coord(game_map)
             dragon = new_playable_dragon(session_dragon_kind, citadel_coord)
             day_index = 1
             heroes_party_city_pool = HeroesPartyCityPool()
             heroes_party_rng = random.Random()
+            world_event_rng = random.Random()
+            world_event_day_state.clear()
             settings_status = ""
             inspector_focus_coord = None
-            inspector_message = ""
             dragon_ability_button_rects = {}
+            event_log.clear()
+            pending_event_lines.clear()
+            event_popup_active = False
+            event_history_open = False
+            event_history_scroll = 0
+            day_debug_log.clear()
+            debug_overlay_active = False
+            debug_selected_day = 1
+            debug_scroll_y = 0
             dragon_panel_scroll = 0
             inspector_panel_scroll = 0
             map_camera = MapViewportCamera()
@@ -1726,7 +2100,7 @@ def run_play_session(
         def _enter_game_over() -> None:
             """Lock the session until the player starts a new run on the same map."""
 
-            nonlocal game_over, inspector_message
+            nonlocal game_over
             nonlocal dragon_upgrade_overlay_active, dragon_upgrade_draft
             nonlocal dragon_upgrade_overlay_baseline, dragon_upgrade_overlay_click
             nonlocal targeting_ability_name
@@ -1734,10 +2108,12 @@ def run_play_session(
             nonlocal raid_overlay_auto_close_deadline_ms
             nonlocal army_combat_target, army_overlay_banner
             nonlocal army_overlay_auto_close_deadline_ms
+            nonlocal event_popup_active
             if game_over:
                 return
             game_over = True
-            inspector_message = ""
+            event_popup_active = False
+            pending_event_lines.clear()
             dragon_upgrade_overlay_active = False
             dragon_upgrade_draft = []
             dragon_upgrade_overlay_baseline = None
@@ -1755,7 +2131,7 @@ def run_play_session(
             nonlocal game_map, citadel_coord, dragon, day_index, screen
             nonlocal fog_of_war
             nonlocal settings_status, new_game_status, dragon_pick_context
-            nonlocal inspector_focus_coord, inspector_message
+            nonlocal inspector_focus_coord
             nonlocal dragon_ability_button_rects, targeting_ability_name
             nonlocal raid_combat_settlement, raid_overlay_banner
             nonlocal raid_overlay_auto_close_deadline_ms
@@ -1767,6 +2143,8 @@ def run_play_session(
             nonlocal dragon_panel_scroll, inspector_panel_scroll, map_camera
             nonlocal game_tuning, game_options_difficulty
             nonlocal heroes_party_city_pool, heroes_party_rng
+            nonlocal event_popup_active, event_history_open, event_history_scroll
+            nonlocal day_debug_log, debug_overlay_active, debug_selected_day, debug_scroll_y
             if pending_map_path is None:
                 return False, "No map selected."
             try:
@@ -1777,7 +2155,7 @@ def run_play_session(
                 return False, "Map file must be inside assets/."
 
             try:
-                new_map = load_map(selected_resolved)
+                new_map = clone_game_map(load_map(selected_resolved))
             except MapLoadError as exc:
                 return False, f"Failed to load map: {exc}"
             except OSError as exc:
@@ -1792,11 +2170,19 @@ def run_play_session(
             settings_status = ""
             new_game_status = ""
             inspector_focus_coord = None
-            inspector_message = ""
             dragon_ability_button_rects = {}
             dragon_panel_scroll = 0
             inspector_panel_scroll = 0
             map_camera = MapViewportCamera()
+            event_log.clear()
+            pending_event_lines.clear()
+            event_popup_active = False
+            event_history_open = False
+            event_history_scroll = 0
+            day_debug_log.clear()
+            debug_overlay_active = False
+            debug_selected_day = 1
+            debug_scroll_y = 0
             targeting_ability_name = None
             raid_combat_settlement = None
             raid_overlay_banner = ""
@@ -1840,6 +2226,8 @@ def run_play_session(
             nonlocal game_options_preset_rects
             nonlocal game_options_scroll
             nonlocal game_over_new_game_rect
+            nonlocal event_history_close_rect, event_history_content_h
+            nonlocal debug_overlay_click
             surf = pygame.display.get_surface()
             surf.fill(BACKGROUND_COLOR)
 
@@ -2044,7 +2432,13 @@ def run_play_session(
                 clip_prev = surf.get_clip()
                 surf.set_clip(map_viewport)
                 pygame.draw.rect(surf, BACKGROUND_COLOR, map_viewport)
-                tile_color = _make_tile_color_fn(dragon, citadel_coord, game_map, fog_of_war)
+                tile_color = _make_tile_color_fn(
+                    dragon,
+                    citadel_coord,
+                    game_map,
+                    fog_of_war,
+                    dark_eclipse=world_event_day_state.dark_eclipse,
+                )
                 render_map(
                     surf,
                     game_map,
@@ -2148,7 +2542,6 @@ def run_play_session(
                     settlements_by_coord=settlements_by_coord,
                     armies_by_coord=armies_on_map,
                     inspector_focus_coord=inspector_focus_coord,
-                    inspector_message=inspector_message,
                     dragon=dragon,
                     raid_combat_active=raid_combat_settlement is not None,
                     army_combat_active=army_combat_target is not None,
@@ -2207,7 +2600,17 @@ def run_play_session(
                     font_small,
                     map_viewport,
                     theme=ui_theme,
+                    debug_active=debug_overlay_active,
                 )
+
+                if event_popup_active and pending_event_lines:
+                    _draw_event_popup(
+                        surf,
+                        font,
+                        pending_event_lines,
+                        map_viewport,
+                        theme=ui_theme,
+                    )
 
                 if targeting_ability_name is not None:
                     mx_t, my_t = pygame.mouse.get_pos()
@@ -2250,6 +2653,33 @@ def run_play_session(
                         font_small_bold=font_small_bold,
                         baseline=dragon_upgrade_overlay_baseline,
                         draft=dragon_upgrade_draft,
+                    )
+
+                event_history_close_rect = None
+                if event_history_open:
+                    event_history_close_rect, event_history_content_h = _draw_event_history_overlay(
+                        surf,
+                        win_w,
+                        win_h,
+                        font_mid,
+                        font_small,
+                        event_log,
+                        event_history_scroll,
+                        theme=ui_theme,
+                    )
+
+                debug_overlay_click = None
+                if debug_overlay_active:
+                    debug_overlay_click = _draw_debug_overlay(
+                        surf,
+                        win_w,
+                        win_h,
+                        font_mid,
+                        font_small,
+                        day_debug_log,
+                        debug_selected_day,
+                        debug_scroll_y,
+                        theme=ui_theme,
                     )
 
                 game_over_new_game_rect = None
@@ -2566,6 +2996,21 @@ def run_play_session(
                             new_game_status = ""
                         redraw()
                         continue
+                    if screen == "game" and event_popup_active:
+                        event_popup_active = False
+                        pending_event_lines.clear()
+                        redraw()
+                        continue
+                    if screen == "game" and event_history_open:
+                        event_history_open = False
+                        event_history_scroll = 0
+                        redraw()
+                        continue
+                    if screen == "game" and debug_overlay_active:
+                        debug_overlay_active = False
+                        debug_scroll_y = 0
+                        redraw()
+                        continue
                     if screen == "game" and dragon_upgrade_overlay_active:
                         redraw()
                         continue
@@ -2574,7 +3019,9 @@ def run_play_session(
                         continue
                     if screen == "game" and targeting_ability_name is not None:
                         targeting_ability_name = None
-                        inspector_message = "Ability targeting cancelled."
+                        event_log.append((day_index, "Ability targeting cancelled."))
+                        pending_event_lines.append("Ability targeting cancelled.")
+                        event_popup_active = True
                         redraw()
                         continue
                     if screen == "game":
@@ -2629,6 +3076,29 @@ def run_play_session(
                         game_options_scroll - event.y * 24,
                         content_h,
                         inner_h,
+                    )
+                    redraw()
+                    continue
+
+                if event.type == pygame.MOUSEWHEEL and screen == "game" and event_history_open:
+                    event_history_scroll = _clamp_panel_scroll(
+                        event_history_scroll - event.y * 24,
+                        event_history_content_h,
+                        max(1, win_h * 3 // 4 - 120),
+                    )
+                    redraw()
+                    continue
+
+                if (
+                    event.type == pygame.MOUSEWHEEL
+                    and screen == "game"
+                    and debug_overlay_active
+                    and debug_overlay_click is not None
+                ):
+                    debug_scroll_y = _clamp_panel_scroll(
+                        debug_scroll_y - event.y * 24,
+                        debug_overlay_click.content_height,
+                        debug_overlay_click.content_viewport_h,
                     )
                     redraw()
                     continue
@@ -2807,6 +3277,21 @@ def run_play_session(
                         redraw()
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                    if screen == "game" and event_popup_active:
+                        event_popup_active = False
+                        pending_event_lines.clear()
+                        redraw()
+                        continue
+                    if screen == "game" and event_history_open:
+                        event_history_open = False
+                        event_history_scroll = 0
+                        redraw()
+                        continue
+                    if screen == "game" and debug_overlay_active:
+                        debug_overlay_active = False
+                        debug_scroll_y = 0
+                        redraw()
+                        continue
                     in_play_session_rc = (
                         screen == "game"
                         and game_map is not None
@@ -2816,7 +3301,9 @@ def run_play_session(
                     if in_play_session_rc and not dragon_upgrade_overlay_active and not game_over:
                         if targeting_ability_name is not None:
                             targeting_ability_name = None
-                            inspector_message = "Ability targeting cancelled."
+                            event_log.append((day_index, "Ability targeting cancelled."))
+                            pending_event_lines.append("Ability targeting cancelled.")
+                            event_popup_active = True
                             redraw()
                             continue
                         mx_r, my_r = event.pos
@@ -2848,7 +3335,6 @@ def run_play_session(
                             if picked != inspector_focus_coord:
                                 inspector_panel_scroll = 0
                             inspector_focus_coord = picked
-                            inspector_message = ""
                             redraw()
                     continue
 
@@ -2957,6 +3443,51 @@ def run_play_session(
                         )
                         gmap, dgn, ccd = game_map, dragon, citadel_coord
 
+                        if event_popup_active:
+                            event_popup_active = False
+                            pending_event_lines.clear()
+                            redraw()
+                            continue
+
+                        if event_history_open:
+                            if (
+                                event_history_close_rect is not None
+                                and event_history_close_rect.collidepoint(mx, my)
+                            ):
+                                event_history_open = False
+                                event_history_scroll = 0
+                            redraw()
+                            continue
+
+                        if debug_overlay_active:
+                            if debug_overlay_click is not None:
+                                clk = debug_overlay_click
+                                if clk.close.collidepoint(mx, my):
+                                    debug_overlay_active = False
+                                    debug_scroll_y = 0
+                                elif clk.day_minus.collidepoint(mx, my):
+                                    log_days = day_debug_log.days()
+                                    if log_days:
+                                        current = _clamp_debug_selected_day(
+                                            debug_selected_day, day_debug_log
+                                        )
+                                        idx = log_days.index(current)
+                                        if idx > 0:
+                                            debug_selected_day = log_days[idx - 1]
+                                            debug_scroll_y = 0
+                                elif clk.day_plus.collidepoint(mx, my):
+                                    log_days = day_debug_log.days()
+                                    if log_days:
+                                        current = _clamp_debug_selected_day(
+                                            debug_selected_day, day_debug_log
+                                        )
+                                        idx = log_days.index(current)
+                                        if idx < len(log_days) - 1:
+                                            debug_selected_day = log_days[idx + 1]
+                                            debug_scroll_y = 0
+                            redraw()
+                            continue
+
                         if game_over:
                             if (
                                 game_over_new_game_rect is not None
@@ -2987,10 +3518,88 @@ def run_play_session(
                                     dragon_upgrade_overlay_active = False
                                     dragon_upgrade_overlay_baseline = None
                                     dragon_upgrade_overlay_click = None
+                                    dragon_hp_before_heal = dgn.hp
                                     dgn.begin_new_day_at_citadel(ccd, tuning=game_tuning)
+                                    world_event_day_state.clear()
                                     day_index += 1
-                                    for ent in settlements_by_coord.values():
-                                        ent.on_settlement_phase_end(tuning=game_tuning)
+                                    day_debug_log.start_day(day_index)
+                                    log_dragon_end_of_day_heal(
+                                        day_debug_log,
+                                        dragon_hp_before_heal,
+                                        dgn.hp,
+                                    )
+                                    citadel_hp_at_day_start = citadel_hp
+                                    world_event_messages: list[str] = []
+                                    world_event_effect_msgs: list[str] = []
+                                    world_roll = roll_world_event(
+                                        game_tuning.world_event_chance_percent,
+                                        world_event_rng,
+                                    )
+                                    log_world_event_roll(
+                                        day_debug_log,
+                                        game_tuning.world_event_chance_percent,
+                                        world_roll,
+                                    )
+                                    if world_roll.triggered and world_roll.event_id:
+                                        citadel_hp, spawned_armies, extra_msgs = apply_world_event(
+                                            world_roll.event_id,
+                                            dragon=dgn,
+                                            game_map=gmap,
+                                            settlements=settlements_by_coord.values(),
+                                            day_state=world_event_day_state,
+                                            citadel_hp=citadel_hp,
+                                            max_citadel_hp=CITADEL_STARTING_HP,
+                                            fog=fog_of_war,
+                                            rng=world_event_rng,
+                                        )
+                                        active_armies.extend(spawned_armies)
+                                        world_event_messages.append(world_roll.description)
+                                        world_event_messages.extend(extra_msgs)
+                                        world_event_effect_msgs.extend(extra_msgs)
+                                    log_world_event_effects(day_debug_log, world_event_effect_msgs)
+                                    log_citadel_hp_change(
+                                        day_debug_log,
+                                        citadel_hp_at_day_start,
+                                        citadel_hp,
+                                        reason="world event",
+                                    )
+                                    (
+                                        double_growth,
+                                        double_heal,
+                                        eco_mult,
+                                    ) = settlement_phase_world_event_hooks(world_event_day_state)
+                                    settlement_phase_outcomes: dict[
+                                        OffsetCoord,
+                                        tuple[SettlementPhaseBefore, Any, bool],
+                                    ] = {}
+                                    for coord, ent in settlements_by_coord.items():
+                                        growth_delayed = settlement_growth_is_delayed(
+                                            world_event_day_state,
+                                            coord,
+                                        )
+                                        before = SettlementPhaseBefore(
+                                            eco=int(ent.eco),
+                                            atk=int(ent.atk),
+                                            dfn=int(ent.dfn),
+                                            hp=int(ent.hp),
+                                        )
+                                        outcome = ent.on_settlement_phase_end(
+                                            tuning=game_tuning,
+                                            growth_delayed=growth_delayed,
+                                            double_growth=double_growth,
+                                            double_healing=double_heal,
+                                            eco_growth_mult=eco_mult,
+                                        )
+                                        settlement_phase_outcomes[coord] = (
+                                            before,
+                                            outcome,
+                                            growth_delayed,
+                                        )
+                                    log_settlement_phase(
+                                        day_debug_log,
+                                        settlements_by_coord,
+                                        settlement_phase_outcomes,
+                                    )
                                     heroes_spawned, heroes_party_city_pool = (
                                         spawn_heroes_party_wave(
                                             settlements_by_coord.values(),
@@ -3000,6 +3609,7 @@ def run_play_session(
                                             rng=heroes_party_rng,
                                         )
                                     )
+                                    log_heroes_party_spawn(day_debug_log, heroes_spawned)
                                     heroes_spawn_message = ""
                                     if heroes_spawned:
                                         active_armies.extend(heroes_spawned)
@@ -3007,24 +3617,73 @@ def run_play_session(
                                             f"Hero's Party marches from "
                                             f"{len(heroes_spawned)} cities!"
                                         )
-                                    active_armies, citadel_hp, phase_msgs, phase_over = (
-                                        _run_end_of_day_army_phase(
-                                            gmap,
-                                            active_armies,
-                                            citadel_coord=ccd,
-                                            citadel_hp=citadel_hp,
-                                        )
+                                    apply_army_day_speed_modifiers(
+                                        active_armies,
+                                        world_event_day_state,
                                     )
+                                    armies_before_phase = snapshot_armies_before_phase(
+                                        active_armies
+                                    )
+                                    citadel_hp_before_army = citadel_hp
+                                    (
+                                        next_armies,
+                                        next_citadel_hp,
+                                        phase_msgs,
+                                        phase_over,
+                                        army_phase_result,
+                                    ) = _run_end_of_day_army_phase(
+                                        gmap,
+                                        active_armies,
+                                        citadel_coord=ccd,
+                                        citadel_hp=citadel_hp,
+                                        dragon=dgn,
+                                        movement_ctx=army_movement_context(world_event_day_state),
+                                    )
+                                    if army_phase_result is not None:
+                                        log_army_phase(
+                                            day_debug_log,
+                                            armies_before_phase,
+                                            active_armies,
+                                            army_phase_result,
+                                            citadel_coord=ccd,
+                                        )
+                                    log_citadel_hp_change(
+                                        day_debug_log,
+                                        citadel_hp_before_army,
+                                        next_citadel_hp,
+                                        reason="army phase",
+                                    )
+                                    active_armies = next_armies
+                                    citadel_hp = next_citadel_hp
                                     active_armies = _prune_defeated_armies(active_armies)
                                     if phase_over or citadel_hp <= 0:
                                         citadel_hp = max(0, citadel_hp)
                                         _enter_game_over()
-                                    elif phase_msgs:
-                                        inspector_message = phase_msgs[-1]
-                                    elif heroes_spawn_message:
-                                        inspector_message = heroes_spawn_message
-                                    elif citadel_hp < CITADEL_STARTING_HP:
-                                        inspector_message = f"Citadel struck! HP {citadel_hp}/{CITADEL_STARTING_HP}."
+                                    else:
+                                        pending_event_lines.clear()
+                                        for msg in world_event_messages:
+                                            event_log.append((day_index, msg))
+                                            pending_event_lines.append(msg)
+                                        if phase_msgs:
+                                            for msg in phase_msgs:
+                                                event_log.append((day_index, msg))
+                                                pending_event_lines.append(msg)
+                                        if heroes_spawn_message:
+                                            event_log.append((day_index, heroes_spawn_message))
+                                            pending_event_lines.append(heroes_spawn_message)
+                                        if citadel_hp < CITADEL_STARTING_HP:
+                                            if not citadel_damage_announced:
+                                                cit_msg = (
+                                                    f"Citadel struck! "
+                                                    f"HP {citadel_hp}/{CITADEL_STARTING_HP}."
+                                                )
+                                                event_log.append((day_index, cit_msg))
+                                                pending_event_lines.append(cit_msg)
+                                                citadel_damage_announced = True
+                                        else:
+                                            citadel_damage_announced = False
+                                        if pending_event_lines:
+                                            event_popup_active = True
                                     redraw()
                                     continue
                                 for st, rr in clk.cost.items():
@@ -3076,7 +3735,9 @@ def run_play_session(
                             dragon_panel_w=dragon_panel_w,
                             inspector_panel_w=inspector_panel_w,
                         )
-                        zoom_in_rect, zoom_out_rect = _map_zoom_control_rects(map_vp_click)
+                        zoom_in_rect, zoom_out_rect, history_btn_rect, debug_btn_rect = (
+                            _map_zoom_control_rects(map_vp_click)
+                        )
                         zoom_anchor = (map_vp_click.w / 2.0, map_vp_click.h / 2.0)
                         if zoom_in_rect.collidepoint(mx, my):
                             map_camera = apply_zoom_step(
@@ -3102,6 +3763,22 @@ def run_play_session(
                             apply_layout(win_w, win_h)
                             redraw()
                             continue
+                        if history_btn_rect.collidepoint(mx, my):
+                            event_history_open = True
+                            event_history_scroll = 0
+                            debug_overlay_active = False
+                            debug_scroll_y = 0
+                            redraw()
+                            continue
+                        if debug_btn_rect.collidepoint(mx, my):
+                            debug_overlay_active = not debug_overlay_active
+                            if debug_overlay_active:
+                                event_history_open = False
+                                event_history_scroll = 0
+                                debug_selected_day = day_debug_log.latest_day() or day_index
+                                debug_scroll_y = 0
+                            redraw()
+                            continue
 
                         if (
                             map_row_top <= my <= map_row_bottom
@@ -3121,12 +3798,11 @@ def run_play_session(
                                     )
                                     if result.ok and result.target_required:
                                         targeting_ability_name = ability_name
-                                        inspector_message = result.reason
                                     elif result.ok:
                                         targeting_ability_name = None
-                                        inspector_message = result.reason
-                                    else:
-                                        inspector_message = result.reason
+                                    event_log.append((day_index, result.reason))
+                                    pending_event_lines.append(result.reason)
+                                    event_popup_active = True
                                     redraw()
                                     break
                             else:
@@ -3154,7 +3830,9 @@ def run_play_session(
                                 target=picked_target,
                                 armies_by_coord=_armies_by_coord(active_armies),
                             )
-                            inspector_message = result.reason
+                            event_log.append((day_index, result.reason))
+                            pending_event_lines.append(result.reason)
+                            event_popup_active = True
                             if result.ok:
                                 targeting_ability_name = None
                             redraw()
@@ -3193,18 +3871,39 @@ def run_play_session(
                                     army_overlay_banner = exchange.reason
                                     army_combat_target = None
                                     army_overlay_auto_close_deadline_ms = None
-                                    inspector_message = exchange.reason
+                                    event_log.append((day_index, exchange.reason))
+                                    pending_event_lines.append(exchange.reason)
+                                    event_popup_active = True
                                     redraw()
                                     continue
 
                                 if _army_hp(target_army) <= 0:
                                     on_combat_ended(dgn)
+                                    was_caravan = _army_kind(target_army) is ArmyKind.GOLDEN_CARAVAN
                                     gold_granted = grant_army_victory_loot(dgn, target_army)
                                     active_armies[:] = _prune_defeated_armies(active_armies)
+                                    if was_caravan:
+                                        revenge = on_golden_caravan_defeated(
+                                            world_event_day_state,
+                                            gmap,
+                                            dragon_level=dgn.level,
+                                            rng=world_event_rng,
+                                        )
+                                        if revenge is not None:
+                                            active_armies.append(revenge)
                                     dname = display_name_for_kind(dgn.kind)
                                     army_overlay_banner = f"{dname} destroyed the army."
+                                    army_win_msg = "Army destroyed!"
                                     if gold_granted:
                                         army_overlay_banner += f" Gained {gold_granted} gold."
+                                        army_win_msg += f" Gained {gold_granted} gold."
+                                    if was_caravan:
+                                        army_win_msg += (
+                                            " A Revenge Army marches to punish your greed!"
+                                        )
+                                    event_log.append((day_index, army_win_msg))
+                                    pending_event_lines.append(army_win_msg)
+                                    event_popup_active = True
                                     army_overlay_auto_close_deadline_ms = (
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
                                     )
@@ -3252,7 +3951,9 @@ def run_play_session(
                                     raid_overlay_banner = exchange.reason
                                     raid_combat_settlement = None
                                     raid_overlay_auto_close_deadline_ms = None
-                                    inspector_message = exchange.reason
+                                    event_log.append((day_index, exchange.reason))
+                                    pending_event_lines.append(exchange.reason)
+                                    event_popup_active = True
                                     redraw()
                                     continue
 
@@ -3274,8 +3975,17 @@ def run_play_session(
                                     raid_overlay_banner = (
                                         f"{dname} won and gained {gold_added} gold"
                                     )
+                                    raid_win_msg = f"Raid victory! Gained {gold_added} gold."
+                                    event_log.append((day_index, raid_win_msg))
+                                    pending_event_lines.append(raid_win_msg)
                                     if spawned:
                                         raid_overlay_banner += f"; {spawned} army mobilized"
+                                        spawn_msg = (
+                                            f"{spawned} army mobilized from nearby settlements!"
+                                        )
+                                        event_log.append((day_index, spawn_msg))
+                                        pending_event_lines.append(spawn_msg)
+                                    event_popup_active = True
                                     raid_overlay_auto_close_deadline_ms = (
                                         pygame.time.get_ticks() + RAID_COMBAT_OVERLAY_AUTO_CLOSE_MS
                                     )
@@ -3305,9 +4015,10 @@ def run_play_session(
                                         raid_combat_settlement = target_settlement
                                         raid_overlay_banner = ""
                                         raid_overlay_auto_close_deadline_ms = None
-                                        inspector_message = ""
                                     else:
-                                        inspector_message = reason
+                                        event_log.append((day_index, reason))
+                                        pending_event_lines.append(reason)
+                                        event_popup_active = True
                             if (
                                 inspector_army_attack_button_rect is not None
                                 and inspector_army_attack_button_rect.collidepoint(mx, my)
@@ -3326,9 +4037,10 @@ def run_play_session(
                                         army_combat_target = target_army
                                         army_overlay_banner = ""
                                         army_overlay_auto_close_deadline_ms = None
-                                        inspector_message = ""
                                     else:
-                                        inspector_message = reason_army
+                                        event_log.append((day_index, reason_army))
+                                        pending_event_lines.append(reason_army)
+                                        event_popup_active = True
                             redraw()
                             continue
 

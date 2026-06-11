@@ -58,6 +58,13 @@ def test_army_png_assets_exist_on_disk() -> None:
         assert detailed_sprite_path(kind).is_file(), f"missing detailed art for {kind}"
 
 
+def test_unmapped_army_kind_uses_fort_footsoldier_art() -> None:
+    for kind in (ArmyKind.RAIDER, ArmyKind.GOLDEN_CARAVAN):
+        assert pixel_sprite_path(kind) == pixel_sprite_path(ArmyKind.FORT)
+        assert detailed_sprite_path(kind) == detailed_sprite_path(ArmyKind.FORT)
+        assert load_pixel_sprite(kind) is not None
+
+
 def test_load_and_scale_helpers() -> None:
     clear_art_caches()
     px = load_pixel_sprite(ArmyKind.VILLAGE)

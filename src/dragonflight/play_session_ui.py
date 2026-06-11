@@ -103,6 +103,17 @@ def clamp_panel_scroll(scroll_y: int, content_height: int, viewport_h: int) -> i
 
 
 @dataclass
+class DebugOverlayClick:
+    """Hit targets returned by the debug-day modal overlay."""
+
+    close: pygame.Rect
+    day_minus: pygame.Rect
+    day_plus: pygame.Rect
+    content_height: int
+    content_viewport_h: int
+
+
+@dataclass
 class ScrollPanelLayout:
     """Content-layout helper for a clipped, vertically scrollable side panel."""
 

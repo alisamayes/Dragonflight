@@ -630,7 +630,6 @@ def draw_tile_inspector_panel(
     settlements_by_coord: dict[OffsetCoord, Settlement],
     armies_by_coord: dict[OffsetCoord, Any],
     inspector_focus_coord: OffsetCoord | None,
-    inspector_message: str,
     dragon: Dragon,
     raid_combat_active: bool,
     army_combat_active: bool,
@@ -830,19 +829,6 @@ def draw_tile_inspector_panel(
                         ),
                     )
                 layout.advance(btn_h + 8)
-
-    if inspector_message:
-        layout.advance(8)
-        for line in wrap_text_to_width(font_small, inspector_message, layout.inner_w):
-            if layout.is_visible(line_h_small):
-                draw_text(
-                    surface,
-                    font_small,
-                    line,
-                    (layout.x, layout.screen_y()),
-                    (200, 220, 160),
-                )
-            layout.advance(line_gap)
 
     layout.end(surface)
     return raid_click_rect, army_attack_click_rect, layout.content_height_total()
