@@ -26,6 +26,7 @@ dragonflight = "dragonflight.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["dragonflight*", "isometric*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
