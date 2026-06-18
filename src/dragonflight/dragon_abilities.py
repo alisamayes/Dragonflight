@@ -650,9 +650,11 @@ def _ui_absolute_zero_breath(
 # =============================================================================
 
 MOUNTAINS_BOON_RANGE_HEXES: int = 3
-MOUNTAINS_BOON_ATTACK_MULTIPLIER: float = 1.10
+MOUNTAINS_BOON_ATTACK_MULTIPLIER: float = 1.20
 MOUNTAINS_BOON_SPEED_BONUS: float = 2.0
-TREMORS_DEFENCE_MULTIPLIER: float = 0.85
+MOUNTAINS_BOON_FLIGHT_RANGE_BONUS: int = 2
+TREMORS_DEFENCE_MULTIPLIER: float = 0.75
+TREMORS_ARMY_SPEED_MULTIPLIER: float = 0.50
 
 
 def mountain_boon_extra_modifiers(
@@ -679,6 +681,13 @@ def mountain_boon_extra_modifiers(
             expiry=ModifierExpiry.HOURS,
             source="Mountain's Boon",
         ),
+        StatModifier(
+            stat=StatKey.FLIGHT_RANGE,
+            kind=ModifierKind.FLAT_ADD,
+            value=MOUNTAINS_BOON_FLIGHT_RANGE_BONUS,
+            expiry=ModifierExpiry.HOURS,
+            source="Mountain's Boon",
+        ),
     )
 
 
@@ -701,8 +710,19 @@ def _ui_mountains_boon(
     attack_bonus = int(round((MOUNTAINS_BOON_ATTACK_MULTIPLIER - 1.0) * 100))
     return [
         f"Mountain within {MOUNTAINS_BOON_RANGE_HEXES} hexes: {'yes' if active else 'no'}.",
-        f"If active: +{attack_bonus}% ATK, +{MOUNTAINS_BOON_SPEED_BONUS:g} speed.",
+        (
+            f"If active: +{attack_bonus}% ATK, +{MOUNTAINS_BOON_SPEED_BONUS:g} speed, "
+            f"+{MOUNTAINS_BOON_FLIGHT_RANGE_BONUS} flight range."
+        ),
     ]
+
+
+def tremors_marked_coords(dragon: Dragon | None) -> frozenset[OffsetCoord]:
+    """Tiles marked loose ground by Tremors (cleared at the citadel day boundary)."""
+
+    if dragon is None:
+        return frozenset()
+    return frozenset(dragon.marked_ability_tiles.get("Tremors", ()))
 
 
 def _tremors(dragon: Dragon, world: GameMap, target: OffsetCoord) -> AbilityUseResult:
@@ -746,8 +766,12 @@ def _terrascape(
 def _ui_tremors(
     _dragon: Dragon, _spec: DragonAbilitySpec, *, world: GameMap | None
 ) -> list[str]:
-    penalty = int(round((1.0 - TREMORS_DEFENCE_MULTIPLIER) * 100))
-    return [f"Marks one tile: -{penalty}% enemy DFN in combat (settlements and armies)."]
+    def_penalty = int(round((1.0 - TREMORS_DEFENCE_MULTIPLIER) * 100))
+    move_penalty = int(round((1.0 - TREMORS_ARMY_SPEED_MULTIPLIER) * 100))
+    return [
+        f"Marks one tile: -{def_penalty}% enemy DFN in combat (settlements and armies).",
+        f"Armies on the tile: -{move_penalty}% move speed until day end.",
+    ]
 
 
 def _ui_terrascape(
@@ -887,6 +911,7 @@ def begin_new_turn(dragon: Dragon) -> None:
     dragon.ability_extra_charges_today.clear()
     dragon.active_ability_hours.clear()
     dragon.passive_stacks["Flame buffer"] = 0
+    dragon.marked_ability_tiles.pop("Tremors", None)
     clear_day_end(dragon.stat_modifiers)
     dragon.hp = min(dragon.hp, effective_max_hp(dragon))
 
@@ -919,7 +944,7 @@ def _target_in_range(
     tile = world.get(target)
     if tile is None:
         return AbilityUseResult(False, "target tile is not on the map", "")
-    if dragon.hex_distance_to(target) > effective_flight_range(dragon):
+    if dragon.hex_distance_to(target) > effective_flight_range(dragon, world=world):
         return AbilityUseResult(False, "target tile is outside dragon range", "")
     return None
 
@@ -1221,8 +1246,16 @@ def effective_defence(dragon: Dragon) -> int:
     return int(read_effective(dragon, dragon.stat_modifiers, StatKey.DFN))
 
 
-def effective_flight_range(dragon: Dragon) -> int:
-    return int(read_effective(dragon, dragon.stat_modifiers, StatKey.FLIGHT_RANGE))
+def effective_flight_range(dragon: Dragon, *, world: GameMap | None = None) -> int:
+    extras = mountain_boon_extra_modifiers(dragon, world=world)
+    return int(
+        read_effective(
+            dragon,
+            dragon.stat_modifiers,
+            StatKey.FLIGHT_RANGE,
+            extra_modifiers=extras,
+        )
+    )
 
 
 def effective_speed_hexes_per_hour(dragon: Dragon, *, world: GameMap | None = None) -> float:
@@ -1293,6 +1326,7 @@ __all__ = [
     "effective_max_hp",
     "effective_speed_hexes_per_hour",
     "mountain_boon_extra_modifiers",
+    "tremors_marked_coords",
     "VIVIFY_MAX_HP_SOURCE",
     "enemy_can_retaliate",
     "enemy_defence_for_round",

@@ -41,6 +41,7 @@ class TestDifficultyPresets:
             "easy": {
                 "army_movement_speed": 8,
                 "heroes_party_cities_per_wave": 1,
+                "aggression_decay_per_day": 20,
                 "raid_aggression_dropoff_per_tile": 20,
                 "settlement_growth_eco_percent": 10,
                 "settlement_growth_stat_bonus": 1,
@@ -53,6 +54,7 @@ class TestDifficultyPresets:
             "normal": {
                 "army_movement_speed": 12,
                 "heroes_party_cities_per_wave": 2,
+                "aggression_decay_per_day": 10,
                 "raid_aggression_dropoff_per_tile": 10,
                 "settlement_growth_eco_percent": 5,
                 "settlement_growth_stat_bonus": 3,
@@ -65,6 +67,7 @@ class TestDifficultyPresets:
             "hard": {
                 "army_movement_speed": 16,
                 "heroes_party_cities_per_wave": 3,
+                "aggression_decay_per_day": 0,
                 "raid_aggression_dropoff_per_tile": 5,
                 "settlement_growth_eco_percent": 0,
                 "settlement_growth_stat_bonus": 5,
@@ -82,6 +85,7 @@ class TestDifficultyPresets:
         normal = GameTuning(
             army_movement_speed=0,
             heroes_party_cities_per_wave=0,
+            aggression_decay_per_day=0,
             raid_aggression_dropoff_per_tile=0,
             settlement_heal_percent_of_max_at_zero=0,
             settlement_heal_percent_of_max_when_damaged=0,
@@ -194,6 +198,20 @@ class TestRaidDefeatTuning:
         defeated.on_raid_defeat([], tuning=easy)
 
         assert defeated.eco == 666
+
+
+class TestAggressionDecayTuning:
+    def test_validate_rejects_aggression_decay_out_of_range(self) -> None:
+        low = replace(_baseline_tuning(), aggression_decay_per_day=-1)
+        high = replace(_baseline_tuning(), aggression_decay_per_day=51)
+        with pytest.raises(ValueError, match="aggression_decay_per_day"):
+            low.validate()
+        with pytest.raises(ValueError, match="aggression_decay_per_day"):
+            high.validate()
+
+    def test_default_includes_normal_decay_preset(self) -> None:
+        t = default_game_tuning()
+        assert t.aggression_decay_per_day == 10
 
 
 class TestRaidAggressionDropoffTuning:

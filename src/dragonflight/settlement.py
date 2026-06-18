@@ -71,6 +71,7 @@ class SettlementPhaseOutcome:
     eco_delta: int = 0
     atk_delta: int = 0
     dfn_delta: int = 0
+    aggression_decay: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +183,20 @@ class Settlement:
     def defence(self, value: int) -> None:
         self.dfn = value
 
+    def apply_aggression_decay(self, tuning: GameTuning | None = None) -> int:
+        """Reduce local aggression by the daily decay amount (floored at 0).
+
+        Does not check spawn thresholds — decay is not an aggression gain.
+        """
+
+        t = _resolved_tuning(tuning)
+        decay = t.aggression_decay_per_day
+        if decay <= 0 or self.aggression <= 0:
+            return 0
+        before = self.aggression
+        self.aggression = max(0, self.aggression - decay)
+        return before - self.aggression
+
     def on_settlement_phase_end(
         self,
         tuning: GameTuning | None = None,
@@ -199,9 +214,10 @@ class Settlement:
         """
 
         t = _resolved_tuning(tuning)
+        aggression_decay = self.apply_aggression_decay(t)
 
         if growth_delayed:
-            return SettlementPhaseOutcome(action="none")
+            return SettlementPhaseOutcome(action="none", aggression_decay=aggression_decay)
 
         if self.hp < self.max_hp:
             if self.hp == 0:
@@ -212,7 +228,11 @@ class Settlement:
                 healing *= 2
             hp_before = self.hp
             self.hp = min(self.max_hp, self.hp + healing)
-            return SettlementPhaseOutcome(action="healed", hp_delta=self.hp - hp_before)
+            return SettlementPhaseOutcome(
+                action="healed",
+                hp_delta=self.hp - hp_before,
+                aggression_decay=aggression_decay,
+            )
 
         if self.hp == self.max_hp:
             eco_growth = compute_settlement_eco_growth(
@@ -236,9 +256,10 @@ class Settlement:
                 eco_delta=eco_growth,
                 atk_delta=stat_bonus,
                 dfn_delta=stat_bonus,
+                aggression_decay=aggression_decay,
             )
 
-        return SettlementPhaseOutcome(action="none")
+        return SettlementPhaseOutcome(action="none", aggression_decay=aggression_decay)
 
     def run_combat_round(
         self,

@@ -264,7 +264,7 @@ class Dragon:
 
         from .dragon_abilities import effective_flight_range
 
-        if dist > effective_flight_range(self):
+        if dist > effective_flight_range(self, world=world):
             return MoveAttempt(ok=False, reason="destination exceeds flight range")
 
         distance_home_from_dest = distance(

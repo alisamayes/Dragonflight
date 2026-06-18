@@ -18,6 +18,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
     "easy": {
         "army_movement_speed": 8,
         "heroes_party_cities_per_wave": 1,
+        "aggression_decay_per_day": 20,
         "raid_aggression_dropoff_per_tile": 20,
         "settlement_growth_eco_percent": 10,
         "settlement_growth_stat_bonus": 1,
@@ -30,6 +31,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
     "normal": {
         "army_movement_speed": 10,
         "heroes_party_cities_per_wave": 2,
+        "aggression_decay_per_day": 10,
         "raid_aggression_dropoff_per_tile": 10,
         "settlement_growth_eco_percent": 5,
         "settlement_growth_stat_bonus": 3,
@@ -42,6 +44,7 @@ _DIFFICULTY_PRESETS: dict[DifficultyLevel, dict[str, int | float]] = {
     "hard": {
         "army_movement_speed": 14,
         "heroes_party_cities_per_wave": 3,
+        "aggression_decay_per_day": 0,
         "raid_aggression_dropoff_per_tile": 5,
         "settlement_growth_eco_percent": 0,
         "settlement_growth_stat_bonus": 5,
@@ -60,6 +63,7 @@ class GameTuning:
 
     army_movement_speed: int
     heroes_party_cities_per_wave: int
+    aggression_decay_per_day: int
     raid_aggression_dropoff_per_tile: int
     settlement_heal_percent_of_max_at_zero: int
     settlement_heal_percent_of_max_when_damaged: int
@@ -85,6 +89,11 @@ class GameTuning:
             raise ValueError(
                 "heroes_party_cities_per_wave must be >= 0, "
                 f"got {self.heroes_party_cities_per_wave}",
+            )
+        if not (0 <= self.aggression_decay_per_day <= 50):
+            raise ValueError(
+                "aggression_decay_per_day must be between 0 and 50 inclusive, "
+                f"got {self.aggression_decay_per_day}",
             )
         if not (1 <= self.raid_aggression_dropoff_per_tile <= 50):
             raise ValueError(
@@ -139,6 +148,7 @@ def default_game_tuning() -> GameTuning:
     tuning = GameTuning(
         army_movement_speed=0,
         heroes_party_cities_per_wave=0,
+        aggression_decay_per_day=0,
         raid_aggression_dropoff_per_tile=0,
         settlement_heal_percent_of_max_at_zero=0,
         settlement_heal_percent_of_max_when_damaged=0,

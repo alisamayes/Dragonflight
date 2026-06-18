@@ -13,15 +13,19 @@ from dragonflight.dragon_abilities import (
     ability_ui_detail_lines,
     active_effect_hours_remaining,
     apply_time_spent,
+    begin_new_turn,
     cooldown_remaining,
     effective_attack,
+    effective_flight_range,
     effective_max_hp,
+    effective_speed_hexes_per_hour,
     on_combat_ended,
+    settlement_defence_for_round,
     synchronize_unlocked_abilities,
     try_use_ability,
     vivify_attack_bonus,
 )
-from dragonflight.dragon_playables import Greengon, Purplegon, Redgon
+from dragonflight.dragon_playables import Browngon, Greengon, Purplegon, Redgon
 from dragonflight.entity_stats import StatKey, flat_add_total_for_source
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
@@ -315,3 +319,66 @@ def test_combat_preview_matches_first_settlement_round_damage() -> None:
     assert isinstance(exchange, DamageRoundExchange)
     assert preview.damage_to_enemy == exchange.damage_to_target
     assert preview.damage_to_dragon == exchange.damage_to_dragon
+
+
+def test_mountains_boon_boosts_attack_speed_and_range_near_peaks() -> None:
+    dragon = Browngon.new_at(OffsetCoord(0, 0))
+    dragon.level = 5
+    synchronize_unlocked_abilities(dragon)
+    open_world = _world(Tile(coord=OffsetCoord(0, 0), terrain=Terrain.GRASSLAND))
+    mountain_world = _world(
+        Tile(coord=OffsetCoord(0, 0), terrain=Terrain.GRASSLAND),
+        Tile(coord=OffsetCoord(2, 0), terrain=Terrain.MOUNTAIN),
+    )
+
+    assert effective_attack(dragon, world=open_world) == 100
+    assert effective_flight_range(dragon, world=open_world) == 4
+    assert effective_speed_hexes_per_hour(dragon, world=open_world) == 4.0
+
+    assert effective_attack(dragon, world=mountain_world) == 120
+    assert effective_flight_range(dragon, world=mountain_world) == 6
+    assert effective_speed_hexes_per_hour(dragon, world=mountain_world) == 6.0
+
+
+def test_tremors_reduces_defence_on_marked_tile() -> None:
+    coord = OffsetCoord(0, 0)
+    dragon = Browngon.new_at(coord)
+    dragon.level = 10
+    synchronize_unlocked_abilities(dragon)
+    settlement = Fort(coord)
+    world = _world(Tile(coord=coord, terrain=Terrain.SETTLEMENT))
+    dragon.marked_ability_tiles["Tremors"] = (coord,)
+
+    assert settlement_defence_for_round(dragon, settlement) == 60
+
+
+def test_terrascape_uses_two_turn_cooldown() -> None:
+    dragon = Browngon.new_at(OffsetCoord(0, 0))
+    dragon.level = 15
+    synchronize_unlocked_abilities(dragon)
+    target = OffsetCoord(2, 0)
+    world = _world(
+        Tile(coord=OffsetCoord(0, 0), terrain=Terrain.CITADEL),
+        Tile(coord=target, terrain=Terrain.GRASSLAND),
+    )
+
+    result = try_use_ability(
+        dragon,
+        "Terrascape",
+        world=world,
+        citadel_coord=OffsetCoord(0, 0),
+        settlements_by_coord={},
+        target=target,
+    )
+
+    assert result.ok
+    assert cooldown_remaining(dragon, "Terrascape") == 2
+
+
+def test_tremors_marks_clear_at_day_boundary() -> None:
+    dragon = Browngon.new_at(OffsetCoord(0, 0))
+    dragon.marked_ability_tiles["Tremors"] = (OffsetCoord(1, 0),)
+
+    begin_new_turn(dragon)
+
+    assert "Tremors" not in dragon.marked_ability_tiles

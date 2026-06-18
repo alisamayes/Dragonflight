@@ -19,6 +19,7 @@ from dragonflight.army_pathfinding import (
 )
 from dragonflight.citadel import DEFAULT_CITADEL_HP, CitadelState
 from dragonflight.dragon import DamageRoundExchange, Dragon, DragonKind
+from dragonflight.dragon_playables import Browngon
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
 from dragonflight.settlement import City, Fort, Village
@@ -311,3 +312,38 @@ class TestArmyCombat:
             position=OffsetCoord(0, 0),
         )
         assert army.is_defeated()
+
+    def test_tremors_tile_halves_army_movement_that_day(self) -> None:
+        game_map = _coord_map(
+            (0, 0, Terrain.GRASSLAND),
+            (1, 0, Terrain.GRASSLAND),
+            (2, 0, Terrain.GRASSLAND),
+            (3, 0, Terrain.GRASSLAND),
+            (4, 0, Terrain.GRASSLAND),
+            (5, 0, Terrain.GRASSLAND),
+            (6, 0, Terrain.CITADEL),
+        )
+        tremors_tile = OffsetCoord(0, 0)
+        citadel = OffsetCoord(6, 0)
+        dragon = Browngon.new_at(citadel)
+        dragon.marked_ability_tiles["Tremors"] = (tremors_tile,)
+        army = Army(
+            hp=10,
+            max_hp=10,
+            atk=1,
+            dfn=1,
+            movement_speed=10,
+            position=tremors_tile,
+        )
+
+        slowed = run_army_phase(
+            game_map,
+            [army],
+            citadel_coord=citadel,
+            citadel_hp=DEFAULT_CITADEL_HP,
+            dragon=dragon,
+        )
+
+        assert len(slowed.armies) == 1
+        assert slowed.armies[0].position == OffsetCoord(5, 0)
+        assert slowed.citadel_attacks == 0

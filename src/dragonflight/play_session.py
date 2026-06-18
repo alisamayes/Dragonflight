@@ -173,6 +173,7 @@ from .settlement import (
     validate_settlement_raid,
 )
 from .terrain import Terrain
+from .tile_art import TileArtKey, map_tile_surface
 from .tile_inspection import army_display_name_for_kind
 from .world_events import (
     WorldEventDayState,
@@ -376,6 +377,12 @@ def _game_options_slider_defs() -> tuple[tuple[str, str, int | float, int | floa
             "raid_aggression_dropoff_per_tile",
             "Raid aggression dropoff (per hex)",
             1,
+            50,
+        ),
+        (
+            "aggression_decay_per_day",
+            "Settlement aggression decay per day",
+            0,
             50,
         ),
         (
@@ -649,7 +656,7 @@ def _make_tile_color_fn(
 
     from .dragon_abilities import effective_flight_range
 
-    flight = effective_flight_range(dragon)
+    flight = effective_flight_range(dragon, world=game_map)
 
     def tile_color(tile: Tile) -> tuple[int, int, int]:
         if dark_eclipse and dragon.hex_distance_to(tile.coord) > flight:
@@ -962,6 +969,73 @@ def _resolve_army_combat_round(
         _set_army_hp(army, exchange.target_hp_after)
         apply_ice_talons_to_army(dragon, army)
     return exchange
+
+
+def _settlement_tile_art_key(tile: Tile) -> TileArtKey | None:
+    if tile.terrain is Terrain.SETTLEMENT:
+        return tile.settlement_kind or SettlementType.VILLAGE
+    if tile.terrain is Terrain.CITADEL:
+        return Terrain.CITADEL
+    return None
+
+
+def _settlement_sprite_mute_state(
+    tile: Tile,
+    dragon: Dragon,
+    citadel: OffsetCoord,
+    game_map: GameMap,
+    *,
+    dark_eclipse: bool = False,
+) -> bool | None:
+    """``None`` = skip sprite overlay; ``True`` / ``False`` = muted / full."""
+
+    if tile.coord == dragon.position:
+        return False
+    if dark_eclipse:
+        from .dragon_abilities import effective_flight_range
+
+        if dragon.hex_distance_to(tile.coord) > effective_flight_range(dragon, world=game_map):
+            return None
+    if dragon.validate_move(tile.coord, game_map, citadel).ok:
+        return False
+    return True
+
+
+def _draw_settlement_tile_sprites_on_map(
+    surface: pygame.Surface,
+    game_map: GameMap,
+    hex_size: float,
+    origin: tuple[float, float],
+    *,
+    fog: FogOfWarState | None = None,
+    dragon: Dragon | None = None,
+    citadel: OffsetCoord | None = None,
+    dark_eclipse: bool = False,
+) -> None:
+    """Settlement / citadel PNG overlays on revealed hexes (below army markers)."""
+
+    for tile in game_map:
+        if fog is not None and not is_revealed(fog, tile.coord):
+            continue
+        art_key = _settlement_tile_art_key(tile)
+        if art_key is None:
+            continue
+        muted: bool | None = False
+        if dragon is not None and citadel is not None:
+            muted = _settlement_sprite_mute_state(
+                tile,
+                dragon,
+                citadel,
+                game_map,
+                dark_eclipse=dark_eclipse,
+            )
+            if muted is None:
+                continue
+        sprite = map_tile_surface(art_key, hex_size, muted=bool(muted))
+        if sprite is None:
+            continue
+        cx, cy = _dragon_screen_center(tile.coord, hex_size, origin)
+        surface.blit(sprite, sprite.get_rect(center=(int(round(cx)), int(round(cy)))))
 
 
 def _draw_army_markers_on_map(
@@ -2447,6 +2521,16 @@ def run_play_session(
                     tile_color=tile_color,
                     clear_background=False,
                 )
+                _draw_settlement_tile_sprites_on_map(
+                    surf,
+                    game_map,
+                    hex_size,
+                    origin,
+                    fog=fog_of_war,
+                    dragon=dragon,
+                    citadel=citadel_coord,
+                    dark_eclipse=world_event_day_state.dark_eclipse,
+                )
                 _draw_army_markers_on_map(surf, active_armies, hex_size, origin, fog=fog_of_war)
                 if (
                     inspector_focus_coord is not None
@@ -2913,6 +2997,12 @@ def run_play_session(
                     origin_edit,
                     tile_color=tile_color,
                     clear_background=False,
+                )
+                _draw_settlement_tile_sprites_on_map(
+                    surf,
+                    edit_map,
+                    hs,
+                    origin_edit,
                 )
 
                 y = toolbar.y + 16

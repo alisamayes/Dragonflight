@@ -245,7 +245,7 @@ class Yellowgon(Dragon):
             hp=500,
             max_hp=500,
             atk=90,
-            dfn=100,
+            dfn=110,
             flight_range_hexes=5,
             speed_hexes_per_hour=6.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
@@ -325,7 +325,7 @@ class Browngon(Dragon):
             "No CD",
             "Constant",
             "Mountain's Boon",
-            "With a mountain within 3 tiles: +2 speed and +10% attack.",
+            "With a mountain within 3 tiles: +20% attack, +2 speed, +2 flight range.",
         ),
         DragonAbilitySpec(
             10,
@@ -335,13 +335,13 @@ class Browngon(Dragon):
             "Tremors",
             (
                 "Earthquake on one tile ('lose ground'); fights there debuff "
-                "hostile armies −15% defence."
+                "hostile armies −25% defence; armies on tile move 50% slower at day end."
             ),
         ),
         DragonAbilitySpec(
             15,
             "ability",
-            "3 turn CD",
+            "2 turn CD",
             "Constant",
             "Terrascape",
             "Raise a permanent mountain with routing/settlement spacing constraints.",
@@ -359,7 +359,7 @@ class Browngon(Dragon):
             atk=100,
             dfn=110,
             flight_range_hexes=4,
-            speed_hexes_per_hour=3.0,
+            speed_hexes_per_hour=4.0,
             hours_remaining=HOURS_PER_DRAGON_DAY,
         )
 

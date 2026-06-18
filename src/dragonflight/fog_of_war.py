@@ -40,7 +40,7 @@ def reveal_coords_in_range(
 ) -> None:
     """Reveal every map hex within :func:`~dragonflight.dragon_abilities.effective_flight_range`."""
 
-    flight = effective_flight_range(dragon)
+    flight = effective_flight_range(dragon, world=game_map)
     for tile in game_map:
         if dragon.hex_distance_to(tile.coord) <= flight:
             fog.reveal(tile.coord)

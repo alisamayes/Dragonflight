@@ -123,7 +123,7 @@ Game over immediately triggers when either condition occurs.
 - No fog of war in MVP
 
 ## Perspective
-- Isometric world-map style presentation. Intial development should just use coloured hexs for simplicity to get mechanical workings in place and later on isometric style artwork for each asset shall be added in to provide more detail
+- Isometric world-map style presentation. Coloured hex fills remain the terrain base; settlement and citadel tiles use PNG art from ``assets/Tiles/`` (drawn in a map post-pass). Additional isometric artwork for other terrains may be added later.
 
 ## Hex coordinate system
 - Use axial coordinates for the hex grid (implementation detail for pathfinding, distance checks, and map authoring)
@@ -231,6 +231,11 @@ The UI should request player confirmation before permanent destruction.
 
 ## Settlement Aggression
 Aggression is tracked locally per settlement.
+
+### Daily aggression decay
+At the end of each settlement phase (every in-game day), each settlement's aggression decreases by `aggression_decay_per_day` from session tuning (difficulty preset or Game Options slider). Decay is floored at 0 and does not spawn armies — only gains from raids or direct attacks can cross the spawn threshold.
+
+Preset decay per day: Easy = 20, Normal = 10, Hard = 0.
 
 ### Aggression Rules
 Direct attack:
@@ -698,6 +703,7 @@ Applying a preset uses `apply_difficulty_preset()`, which sets `settlement_growt
 | `army_movement_speed` | 8 | 12 | 16 |
 | `heroes_party_cities_per_wave` | 1 | 2 | 3 |
 | `raid_aggression_dropoff_per_tile` | 20 | 10 | 5 |
+| `aggression_decay_per_day` | 20 | 10 | 0 |
 | `settlement_growth_eco_percent` | 10 | 5 | 0 |
 | `raid_eco_loss_divisor` | 1.5 | 2.0 | 3.0 |
 | `raid_stat_loss` | 10 | 6 | 3 |
@@ -713,6 +719,7 @@ Beyond presets, the Game Options panel exposes sliders (mins/max as implemented 
 | --- | --- |
 | `army_movement_speed` | Army movement per day |
 | `raid_aggression_dropoff_per_tile` | Raid aggression dropoff (per hex) |
+| `aggression_decay_per_day` | Settlement aggression decay per day |
 | `settlement_growth_eco_percent` | Eco growth percent on current eco (see settlement growth formula, Section 6) |
 | `settlement_growth_stat_bonus` | Settlement ATK / DFN growth per growth tick |
 | `raid_eco_loss_divisor` | Settlement eco loss on defeat (divisor into current eco) |

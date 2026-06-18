@@ -217,8 +217,20 @@ def log_settlement_phase(
         at = f"{label} {_format_coord(coord)}"
 
         if growth_delayed:
-            log.add_entry(f"{at}: growth delayed")
+            if outcome.aggression_decay > 0:
+                agg_after = max(0, ent.aggression)
+                agg_before = agg_after + outcome.aggression_decay
+                log.add_entry(
+                    f"{at}: growth delayed; aggression {agg_before} -> {agg_after}",
+                )
+            else:
+                log.add_entry(f"{at}: growth delayed")
             continue
+
+        if outcome.aggression_decay > 0:
+            agg_after = max(0, ent.aggression)
+            agg_before = agg_after + outcome.aggression_decay
+            log.add_entry(f"{at}: aggression decay {agg_before} -> {agg_after}")
 
         if outcome.action == "grew":
             eco_after = before.eco + outcome.eco_delta

@@ -1,7 +1,8 @@
 """Slice 1 hex-map renderer (Pygame).
 
 Pure presentation layer for the "see the map" slice (spec num4 Perspective bullet:
-"Initial development should just use coloured hexs"). The renderer reads a
+coloured hex fills; settlement and citadel tile art is drawn in a post-pass by
+``play_session`` via :mod:`dragonflight.tile_art`). The renderer reads a
 :class:`~dragonflight.map_state.GameMap` and draws each tile as a flat-top
 hex polygon filled with a per-terrain colour.
 

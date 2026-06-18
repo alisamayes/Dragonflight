@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from dataclasses import replace
+
 import pytest
 
 from dragonflight.army import Army
+from dragonflight.game_tuning import default_game_tuning
 from dragonflight.dragon import DamageRoundExchange, Dragon, DragonKind, MoveAttempt
 from dragonflight.hex_coord import OffsetCoord
 from dragonflight.map_state import GameMap, Tile
@@ -163,6 +166,56 @@ class TestSettlementPhase:
         assert outcome.action == "grew"
         assert outcome.eco_delta == 200
         assert city.eco == 5200
+
+
+class TestSettlementAggressionDecay:
+    def test_decay_follows_tuning_on_growth_tick(self) -> None:
+        tuning = replace(default_game_tuning(), aggression_decay_per_day=10)
+        village = Village(OffsetCoord(0, 0), aggression=25)
+
+        outcome = village.on_settlement_phase_end(tuning=tuning)
+
+        assert outcome.action == "grew"
+        assert outcome.aggression_decay == 10
+        assert village.aggression == 15
+
+    def test_decay_floors_at_zero(self) -> None:
+        tuning = replace(default_game_tuning(), aggression_decay_per_day=20)
+        village = Village(OffsetCoord(0, 0), aggression=15)
+
+        outcome = village.on_settlement_phase_end(tuning=tuning)
+
+        assert outcome.aggression_decay == 15
+        assert village.aggression == 0
+
+    def test_decay_runs_when_growth_delayed(self) -> None:
+        tuning = replace(default_game_tuning(), aggression_decay_per_day=10)
+        village = Village(OffsetCoord(0, 0), aggression=30)
+
+        outcome = village.on_settlement_phase_end(tuning=tuning, growth_delayed=True)
+
+        assert outcome.action == "none"
+        assert outcome.aggression_decay == 10
+        assert village.aggression == 20
+        assert village.eco == 400
+
+    def test_zero_decay_preset_leaves_aggression_unchanged(self) -> None:
+        tuning = replace(default_game_tuning(), aggression_decay_per_day=0)
+        fort = Fort(OffsetCoord(0, 0), aggression=250)
+
+        outcome = fort.on_settlement_phase_end(tuning=tuning)
+
+        assert outcome.aggression_decay == 0
+        assert fort.aggression == 250
+
+    def test_decay_does_not_spawn_army_at_threshold(self) -> None:
+        tuning = replace(default_game_tuning(), aggression_decay_per_day=10)
+        fort = Fort(OffsetCoord(0, 0), aggression=300)
+
+        outcome = fort.on_settlement_phase_end(tuning=tuning)
+
+        assert outcome.aggression_decay == 10
+        assert fort.aggression == 290
 
 
 class TestComputeSettlementEcoGrowth:

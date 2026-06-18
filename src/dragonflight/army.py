@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -379,7 +380,9 @@ def run_army_phase(
     """Resolve army movement, merge, and citadel attacks (spec num2 Phase 4)."""
 
     from .world_events import army_effective_movement_speed
+    from .dragon_abilities import TREMORS_ARMY_SPEED_MULTIPLIER, tremors_marked_coords
 
+    tremors_tiles = tremors_marked_coords(dragon)
     citadel = CitadelState(position=citadel_coord, hp=citadel_hp)
     active = [army for army in armies if not army.is_defeated()]
     ordered = sorted(
@@ -396,6 +399,8 @@ def run_army_phase(
     for army in ordered:
         goal = army.march_goal or citadel_coord
         speed = army_effective_movement_speed(army)
+        if army.position in tremors_tiles:
+            speed = max(1, int(math.floor(speed * TREMORS_ARMY_SPEED_MULTIPLIER)))
         army.position = advance_along_path(
             army.position,
             goal,
